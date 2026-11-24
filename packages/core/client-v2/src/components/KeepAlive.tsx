@@ -81,8 +81,8 @@ interface KeepAliveProps {
   children: (uid: string) => React.ReactNode;
 }
 
-const MINIMUM_CACHED_PAGES = 5;
-const MAXIMUM_CACHED_PAGES = 15;
+const MINIMUM_CACHED_PAGES = 2;
+const MAXIMUM_CACHED_PAGES = 2;
 
 const getMaxPageCount = () => {
   const baseCount = MINIMUM_CACHED_PAGES;
@@ -109,19 +109,27 @@ const MAX_RENDERED_PAGE_COUNT = getMaxPageCount();
 export const KeepAlive: FC<KeepAliveProps> = React.memo(({ children, uid }) => {
   const { active } = useKeepAlive();
   const renderedUidListRef = useRef<string[]>([]);
+  const renderedChildrenRef = useRef(new Map<string, React.ReactNode>());
 
   if (!renderedUidListRef.current.includes(uid)) {
     renderedUidListRef.current.push(uid);
+    renderedChildrenRef.current.set(uid, children(uid));
     if (renderedUidListRef.current.length > MAX_RENDERED_PAGE_COUNT) {
-      renderedUidListRef.current = renderedUidListRef.current.slice(-MAX_RENDERED_PAGE_COUNT);
+      const evictedUid = renderedUidListRef.current.shift();
+      if (evictedUid) {
+        renderedChildrenRef.current.delete(evictedUid);
+      }
     }
+  } else {
+    // 仅当前活跃页面需要刷新子元素以接收最新路由上下文；非活跃页面复用同一元素引用，避免切换时整页重渲染。
+    renderedChildrenRef.current.set(uid, children(uid));
   }
 
   return (
     <>
       {renderedUidListRef.current.map((renderedUid) => (
         <KeepAliveProvider active={renderedUid === uid} key={renderedUid} parentActive={active}>
-          {children(renderedUid)}
+          {renderedChildrenRef.current.get(renderedUid)}
         </KeepAliveProvider>
       ))}
     </>
