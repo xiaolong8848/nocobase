@@ -97,6 +97,29 @@ shouldCellUpdate: (record, prevRecord) => record !== prevRecord,
 - 快速编辑刷新正常（新 record 引用触发更新）
 - 无契约变更、无新依赖、只加一行列属性
 
+### ⚠️ 重要修正：发现并修复勾选回归（用户报告）
+
+用户报告"列表勾选需点击多次"。实测确认：第一次点击 checkbox 视觉状态（checked/选中行 class）不更新，第二次点击才生效。
+
+**二分定位过程**（每次只留一个改动，dev 完全重启后实测）：
+| 改动组合 | 一次点击生效? |
+|---|---|
+| shouldCellUpdate + props稳定化 + MemoBodyRow | ❌ 需两次 |
+| 移除 shouldCellUpdate（保留 props稳定化 + MemoBodyRow） | ❌ 需两次 |
+| 保留 shouldCellUpdate，移除 MemoBodyRow（保留 props稳定化） | ❌ 需两次 |
+| **只保留 shouldCellUpdate（移除 props稳定化 + MemoBodyRow）** | ✅ **一次生效** |
+
+**根因**：`TableBlockModel.tsx` 的 props 稳定化改动（`TableBlockContent` 的 `React.memo` + `selectedKeySignature` 的 join/split）阻断了勾选状态向 `HighPerformanceTable` 的传递，导致内部 `selectedRowKeys` state 滞后一次更新。
+
+**修复**：从 v2.2.51 tag 恢复 `TableBlockModel.tsx` 和 `dragSortHooks.tsx`，**只保留 `TableColumnModel.tsx:331` 的 `shouldCellUpdate` 一行**。
+
+**修复后实测**：
+- 一次点击即生效（checked=true, rowSelected=true）✅
+- 性能收益保留：perfMedian 100ms（基线 488ms，-79%）✅
+- 单测 55/55、eslint 无警告 ✅
+
+**最终方案**：仅一行改动 `shouldCellUpdate: (record, prevRecord) => record !== prevRecord`，零副作用、零复杂度增加。之前的 props 稳定化/MemoBodyRow 是无效且有害的改动，已全部移除。
+
 ### 联动风险实测验证（已排除，无需门禁）
 
 **担忧**：联动规则若只改 observable 而不换 record 引用，cell 是否会因 `shouldCellUpdate=false` 而不刷新？
