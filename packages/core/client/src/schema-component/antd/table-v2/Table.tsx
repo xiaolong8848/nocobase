@@ -325,6 +325,8 @@ const useTableColumns = (
     return integratedColumns.map((column) => ({
       ...column,
       width: column.columnHidden && !designable ? 0 : column.width,
+      // 勾选等仅选中态变化时 record 引用不变，跳过未变化单元格的重渲染。
+      shouldCellUpdate: (record, prevRecord) => record !== prevRecord,
       onCell: (record, rowIndex) => {
         return {
           record,
