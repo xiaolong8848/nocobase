@@ -340,6 +340,13 @@ export class TableColumnModel extends DisplayItemModel {
       <>
         {this.mapSubModels('field', (field) => {
           const rowKey = getRowKey(record, this.context.collection.filterTargetKey);
+          // 翻页会不断产生新 rowKey，fork 缓存若无上限会随浏览页数线性增长。
+          // forks 是插入顺序的 Set，超出上限时释放最早创建的 fork（dispose 会同时清理 forkCache）。
+          const MAX_CELL_FORKS = 600;
+          if (field.forks.size > MAX_CELL_FORKS) {
+            const oldest = field.forks.values().next().value as { dispose: () => void } | undefined;
+            oldest?.dispose();
+          }
           const fork = field.createFork({}, `${record?.__index || index}_${rowKey}`);
           const recordMeta: PropertyMetaFactory = createRecordMetaFactory(
             () => fork.context.collection,
