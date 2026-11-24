@@ -1,0 +1,57 @@
+# Phase 1 性能改动实测结果（负面结果记录）
+
+> 日期：2026-11-24
+> 环境：dev 模式，pg16，200 行 × 10 列表，pageSize=200
+> 测量方法：`checkbox.click()` 同步耗时（React 对 discrete event 同步刷新），12 次取中位数
+
+## 实测数据
+
+| 版本 | 12 次同步 click 耗时（ms，排序后） | 中位数 |
+|---|---|---|
+| **基线**（stash 回退 Phase 1 全部改动） | 462.5, 464.5, 467.1, 467.5, 471.1, **475.7**, 476.4, 481.5, 484.4, 485, 485.1, 505.7 | **476 ms** |
+| **Phase 1 改动后**（props 稳定 + 行级 memo） | 460.9, 470.7, 475.5, 480, 481.9, **482.8**, 484.3, 487.5, 490.5, 492.3, 493.4, 564 | **484 ms** |
+
+（dev server 完全重启后复测，排除热更新/缓存干扰，结果一致。）
+
+**结论：Phase 1 改动对勾选交互耗时没有可测量的改善（差异在噪声内，甚至略慢）。**
+
+## 为什么无效（根因分析）
+
+1. **勾选卡顿的主因是 `HighPerformanceTable` 内部的 `selectedRowKeys` state**（`TableBlockModel.tsx:1022`）：
+   ```ts
+   const [selectedRowKeys, setSelectedRowKeys] = React.useState(selectedRowKeysFromResource || []);
+   ```
+   `onChange` 里 `setSelectedRowKeys(...)` 触发组件**自身**重渲染。`React.memo` 只阻止 props 变化引起的重渲染，**对组件内部 state 变化无效**。
+   
+   我稳定外部 props（pagination / selectedRowKeysFromResource）解决的是"外部 observer 重渲染击穿 memo"，与勾选路径无关。
+
+2. **行级 memo 无效**：非拖拽行改为 `MemoBodyRow = React.memo(...)` 后无改善，说明 antd/rc-table 传给每行的 props（含 children cells 或 onRow 闭包）每次都是新对象，memo 命中不了。
+
+3. **真正成本**：antd Table 收到新 `selectedRowKeys` 后做全表 reconcile（200 行 × 13 列，含 notes 长文本），约 470ms。
+
+## 下一步需要更深的结构性改动（超出低风险范围）
+
+要真正解决勾选卡顿，必须动 `HighPerformanceTable` 内部：
+
+| 方案 | 做法 | 风险 |
+|---|---|---|
+| A. selectedRowKeys 去 state 化 | 用 `useRef` + 命令式更新 checkbox，避免 setState 触发整表重渲染 | 中（需与 antd rowSelection 契约兼容） |
+| B. `shouldCellUpdate` | 给每列配 `shouldCellUpdate`，跳过未变化单元格 | 中（需逐列配置，动态列复杂） |
+| C. 单元格池化 + 虚拟 | 定点虚拟（Phase 4）， mounted cell 从 2614 降到 ~200 | 中高（重写 3 个 body 组件） |
+
+这些都不是"改引用稳定"能解决的，需要重构 `HighPerformanceTable` 内部或上虚拟滚动。
+
+## 建议
+
+- **不要保留 Phase 1 的 props/行级 memo 改动作为"性能优化"**——实测无效，还增加代码复杂度（pagination 参数化、签名 join/split、memo 行）。若要保留，只能作为后续虚拟化的准备性重构，不宣称性能收益。
+- 把预算直接投向**方案 C（定点虚拟）**或**方案 A（selectedRowKeys 去 state 化）**，这才是能拿到 50%+ 收益的路径。
+- 这与前报 `FINAL-DECISION` 的判断一致：低风险快赢（props 稳定）在实际表中不解决问题；真正的杠杆在虚拟化和内部 state 治理。
+
+## 当前代码状态
+
+Phase 1 改动仍在工作区（未提交）：
+- `TableBlockModel.tsx`: pagination 参数化 + useMemo + selectedKeySignature + TableBlockContent React.memo
+- `dragSortHooks.tsx`: MemoBodyRow
+- 单测 13 文件 / 55 用例全部通过，eslint 无警告
+
+是否保留待用户决定。
