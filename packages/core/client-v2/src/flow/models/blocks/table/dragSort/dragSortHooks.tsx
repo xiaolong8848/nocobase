@@ -15,6 +15,9 @@ import type { TableBlockModel } from '../TableBlockModel';
 import { getRowKey } from '../utils';
 import { SortableRow } from './dragSortComponents';
 
+// 非拖拽表格的行组件 memo 化：勾选时只有选中行的 props 变化，避免整表 200 行重新渲染。
+const MemoBodyRow = React.memo((props: React.ComponentProps<'tr'>) => <tr {...props} />);
+
 export function useDragSortBodyWrapper(
   model: TableBlockModel,
   dataSourceRef: React.MutableRefObject<any>,
@@ -125,7 +128,7 @@ export function useDragSortBodyWrapper(
 export function useDragSortRowComponent(dragSort: boolean) {
   return useMemo(() => {
     if (!dragSort) {
-      return (props) => <tr {...props} />;
+      return MemoBodyRow;
     }
     return SortableRow;
   }, [dragSort]);

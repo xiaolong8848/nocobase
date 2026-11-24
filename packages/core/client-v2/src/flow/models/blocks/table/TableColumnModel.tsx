@@ -327,6 +327,8 @@ export class TableColumnModel extends DisplayItemModel {
         );
       },
       hidden: this.hidden && !this.context.flowSettingsEnabled,
+      // 勾选等仅选中态变化时 record 引用不变，跳过未变化单元格的重渲染。
+      shouldCellUpdate: (record, prevRecord) => record !== prevRecord,
     };
   }
   onInit(options: any): void {

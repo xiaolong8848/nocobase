@@ -569,13 +569,22 @@ export class TableBlockModel extends CollectionBlockModel<TableBlockModelStructu
     return true;
   }
 
-  pagination() {
-    const totalCount = this.resource.getMeta('count');
-    const pageSize = this.resource.getPageSize();
-    const hasNext = this.resource.getMeta('hasNext');
-    const current = this.resource.getPage();
-    const data = this.resource.getData();
-    const isMobileLayout = !!this.context.isMobileLayout;
+  pagination(snapshot?: {
+    totalCount?: number;
+    pageSize?: number;
+    current?: number;
+    hasNext?: boolean;
+    dataLength?: number;
+    isMobileLayout?: boolean;
+    controlHeight?: number;
+  }) {
+    const totalCount = snapshot ? snapshot.totalCount : this.resource.getMeta('count');
+    const pageSize = snapshot ? snapshot.pageSize : this.resource.getPageSize();
+    const hasNext = snapshot ? snapshot.hasNext : this.resource.getMeta('hasNext');
+    const current = snapshot ? snapshot.current : this.resource.getPage();
+    const dataLength = snapshot ? snapshot.dataLength : this.resource.getData()?.length;
+    const isMobileLayout = snapshot ? !!snapshot.isMobileLayout : !!this.context.isMobileLayout;
+    const controlHeight = snapshot ? snapshot.controlHeight : this.context.themeToken.controlHeight;
     if (totalCount) {
       const result = {
         current,
@@ -598,7 +607,7 @@ export class TableBlockModel extends CollectionBlockModel<TableBlockModelStructu
         hideOnSinglePage: false,
         pageSize: nextPageSize,
         total: getUnknownCountPaginationTotal({
-          dataLength: data?.length,
+          dataLength,
           pageSize: nextPageSize,
           current: nextCurrent,
           hasNext,
@@ -606,7 +615,7 @@ export class TableBlockModel extends CollectionBlockModel<TableBlockModelStructu
         className: mergePaginationClassName(getSimpleModePaginationClassName(), undefined),
         itemRender: createCompactSimpleItemRender({
           current: nextCurrent,
-          controlHeight: this.context.themeToken.controlHeight,
+          controlHeight: controlHeight ?? this.context.themeToken.controlHeight,
         }),
       };
       return applyMobilePaginationProps(result, isMobileLayout);
@@ -688,7 +697,6 @@ export class TableBlockModel extends CollectionBlockModel<TableBlockModelStructu
           virtual={this.props.virtual}
           dataSource={this.resource.getData()}
           columns={this.columns.value}
-          pagination={this.pagination()}
           highlightedRowKey={highlightedRowKey}
           selectedRowKeysFromResource={this.resource
             .getSelectedRows()
@@ -703,64 +711,86 @@ export class TableBlockModel extends CollectionBlockModel<TableBlockModelStructu
   }
 }
 
-const TableBlockContent = (props: {
-  model: TableBlockModel;
-  size: any;
-  virtual: boolean;
-  dataSource: any;
-  columns: any;
-  pagination: any;
-  highlightedRowKey: string;
-  selectedRowKeysFromResource: string[];
-  defaultExpandAllRows?: boolean;
-  expandedRowKeys?: any[];
-  heightMode?: string;
-  height?: number;
-}) => {
-  const {
-    model,
-    size,
-    virtual,
-    dataSource,
-    columns,
-    pagination,
-    highlightedRowKey,
-    selectedRowKeysFromResource,
-    defaultExpandAllRows,
-    expandedRowKeys,
-    heightMode,
-    height,
-  } = props;
-  const tableAreaRef = useRef<HTMLDivElement>(null);
-  const scrollY = useBlockHeight({
-    heightMode,
-    tableAreaRef,
-    deps: [height, heightMode],
-  });
-  const tableScroll = useMemo(() => {
-    const y = scrollY && scrollY > 0 && dataSource?.length ? scrollY : undefined;
-    return { x: 'max-content', y };
-  }, [scrollY, dataSource?.length]);
-  return (
-    <div ref={tableAreaRef} style={{ flex: 1, minHeight: 0 }}>
-      <HighPerformanceSpin spinning={!!model.resource.loading}>
-        <HighPerformanceTable
-          model={model}
-          size={size}
-          virtual={virtual}
-          dataSource={dataSource}
-          columns={columns}
-          pagination={pagination}
-          highlightedRowKey={highlightedRowKey}
-          selectedRowKeysFromResource={selectedRowKeysFromResource}
-          defaultExpandAllRows={defaultExpandAllRows}
-          expandedRowKeys={expandedRowKeys}
-          tableScroll={tableScroll}
-        />
-      </HighPerformanceSpin>
-    </div>
-  );
-};
+const TableBlockContent = React.memo(
+  (props: {
+    model: TableBlockModel;
+    size: any;
+    virtual: boolean;
+    dataSource: any;
+    columns: any;
+    highlightedRowKey: string;
+    selectedRowKeysFromResource: string[];
+    defaultExpandAllRows?: boolean;
+    expandedRowKeys?: any[];
+    heightMode?: string;
+    height?: number;
+  }) => {
+    const {
+      model,
+      size,
+      virtual,
+      dataSource,
+      columns,
+      highlightedRowKey,
+      selectedRowKeysFromResource,
+      defaultExpandAllRows,
+      expandedRowKeys,
+      heightMode,
+      height,
+    } = props;
+    const tableAreaRef = useRef<HTMLDivElement>(null);
+    const scrollY = useBlockHeight({
+      heightMode,
+      tableAreaRef,
+      deps: [height, heightMode],
+    });
+    const tableScroll = useMemo(() => {
+      const y = scrollY && scrollY > 0 && dataSource?.length ? scrollY : undefined;
+      return { x: 'max-content', y };
+    }, [scrollY, dataSource?.length]);
+
+    // 依赖原始标量重建 pagination，避免每次渲染新对象击穿 HighPerformanceTable 的 memo。
+    const totalCount = model.resource.getMeta('count');
+    const pageSize = model.resource.getPageSize();
+    const current = model.resource.getPage();
+    const hasNext = model.resource.getMeta('hasNext');
+    const dataLength = model.resource.getData()?.length;
+    const isMobileLayout = !!model.context.isMobileLayout;
+    const controlHeight = model.context.themeToken.controlHeight;
+    const pagination = useMemo(
+      () => model.pagination({ totalCount, pageSize, current, hasNext, dataLength, isMobileLayout, controlHeight }),
+      [model, totalCount, pageSize, current, hasNext, dataLength, isMobileLayout, controlHeight],
+    );
+
+    // 选中行 key 按内容签名稳定引用，避免新数组导致整表重渲染。
+    const selectedKeySignature = selectedRowKeysFromResource?.join('|') ?? '';
+    const stableSelectedRowKeys = useMemo(
+      () => (selectedKeySignature ? selectedKeySignature.split('|') : []),
+      [selectedKeySignature],
+    );
+
+    return (
+      <div ref={tableAreaRef} style={{ flex: 1, minHeight: 0 }}>
+        <HighPerformanceSpin spinning={!!model.resource.loading}>
+          <HighPerformanceTable
+            model={model}
+            size={size}
+            virtual={virtual}
+            dataSource={dataSource}
+            columns={columns}
+            pagination={pagination}
+            highlightedRowKey={highlightedRowKey}
+            selectedRowKeysFromResource={stableSelectedRowKeys}
+            defaultExpandAllRows={defaultExpandAllRows}
+            expandedRowKeys={expandedRowKeys}
+            tableScroll={tableScroll}
+          />
+        </HighPerformanceSpin>
+      </div>
+    );
+  },
+);
+TableBlockContent.displayName = 'TableBlockContent';
 
 TableBlockModel.registerFlow({
   key: 'resourceSettings2',

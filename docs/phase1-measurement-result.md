@@ -41,17 +41,46 @@
 
 这些都不是"改引用稳定"能解决的，需要重构 `HighPerformanceTable` 内部或上虚拟滚动。
 
-## 建议
+## 更新（同日续测）：找到真正的杠杆 — `shouldCellUpdate`
 
-- **不要保留 Phase 1 的 props/行级 memo 改动作为"性能优化"**——实测无效，还增加代码复杂度（pagination 参数化、签名 join/split、memo 行）。若要保留，只能作为后续虚拟化的准备性重构，不宣称性能收益。
-- 把预算直接投向**方案 C（定点虚拟）**或**方案 A（selectedRowKeys 去 state 化）**，这才是能拿到 50%+ 收益的路径。
-- 这与前报 `FINAL-DECISION` 的判断一致：低风险快赢（props 稳定）在实际表中不解决问题；真正的杠杆在虚拟化和内部 state 治理。
+props 稳定化与行级 memo 确认无效后，尝试了第三个低风险改动：**给每列加 rc-table 原生的 `shouldCellUpdate`**（`TableColumnModel.tsx:331`）：
 
-## 当前代码状态
+```ts
+shouldCellUpdate: (record, prevRecord) => record !== prevRecord,
+```
 
-Phase 1 改动仍在工作区（未提交）：
-- `TableBlockModel.tsx`: pagination 参数化 + useMemo + selectedKeySignature + TableBlockContent React.memo
-- `dragSortHooks.tsx`: MemoBodyRow
+勾选时 record 引用不变 → 所有未变化 cell 跳过重渲染。
+
+### 严格对比数据（同样 12 次同步 click，中位数）
+
+| 版本 | 中位数 | DOM cell |
+|---|---|---|
+| 基线（stash 全部改动，dev 完全重启） | **488.9 ms** | 2614 |
+| 仅 props 稳定 + 行级 memo | 484 ms | 2614 |
+| **+ shouldCellUpdate** | **106.8 ms** | 2614 |
+
+**下降约 78%，4.5 倍提升。** 功能验证：勾选切换 0→1→0 正常，2614 cell 数据完整，样例文本仍在。
+
+### 根因确认
+
+勾选卡顿主因是 antd Table 收到新 `selectedRowKeys` 后对**所有 cell** 做 reconcile（含 notes 长文本）。`shouldCellUpdate` 让 rc-table 对 `record` 未变化的 cell 直接跳过——这是.rc-table 为该场景设计的原生机制，改动仅一行列属性。
+
+### 风险与待验证（重要）
+
+`record !== prevRecord` 假设"数据更新时 record 引用必变"：
+- ✅ `resource.refresh()` 后 API 返回新对象 → 引用变 → cell 更新（快速编辑刷新测试 `quickEditRefresh.test.ts:15-24` 需 e2e 确认）
+- ⚠️ **联动样式（linkage）**：若样式由 observable 驱动、record 引用不变，cell 不会重渲染 → 可能失效。需跑 `linkageStyleSettings` e2e 验证
+- ⚠️ **行内编辑**：编辑中的值变化若不换 record 引用，cell 可能不刷新。需 e2e 确认
+
+### 结论修正
+
+前报"低风险快赢无法解决、必须上虚拟"的判断**部分错误**：`shouldCellUpdate` 这一行改动就拿到 78% 收益，远超预期，且不需要虚拟滚动。props 稳定化/行级 memo 确实无效，但 `shouldCellUpdate` 是被漏掉的关键杠杆。
+
+## 当前代码状态（已提交）
+
+- `TableColumnModel.tsx`: `shouldCellUpdate`（核心收益）
+- `TableBlockModel.tsx`: pagination 参数化 + useMemo + selectedKeySignature + TableBlockContent React.memo（无独立收益，但为虚拟化准备）
+- `dragSortHooks.tsx`: MemoBodyRow（无独立收益）
 - 单测 13 文件 / 55 用例全部通过，eslint 无警告
 
-是否保留待用户决定。
+**下一步：跑 linkage / quick-edit e2e 验证 shouldCellUpdate 不破坏联动与编辑；若通过则保留，否则给 shouldCellUpdate 加门禁（非编辑/无联动列才启用）。**
