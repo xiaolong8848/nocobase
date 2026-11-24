@@ -97,4 +97,23 @@ shouldCellUpdate: (record, prevRecord) => record !== prevRecord,
 - 快速编辑刷新正常（新 record 引用触发更新）
 - 无契约变更、无新依赖、只加一行列属性
 
-**剩余风险**：v2 的联动样式由 `beforeRender` Flow 驱动（`TableColumnModel.tsx:439-455`），若某联动规则仅改变 observable 而不换 record 引用，该 cell 不会重渲染。本测试表无联动规则，未覆盖此场景。建议在实际有联动的页面上做一次回归；若发现问题，给 shouldCellUpdate 加门禁（对配置了 beforeRender 流的列返回 true）即可，不影响主收益。
+### 联动风险实测验证（已排除，无需门禁）
+
+**担忧**：联动规则若只改 observable 而不换 record 引用，cell 是否会因 `shouldCellUpdate=false` 而不刷新？
+
+**实测方法**（浏览器运行时注入）：
+1. 通过 `window.__nocobase_v2_app__.flowEngine._modelInstances` 找到表格列模型（标题列的字段模型 `DisplayTextFieldModel`）
+2. 取其 `forkCache`（200 个，每行一个 fork）中第一行的 fork，模拟联动执行 `fork.setProps({ value: '【联动测试XYZ】...' })` —— **record 完全不变**
+3. 观察 cell 是否更新
+
+**结果**：cell 立即显示新值"【联动测试XYZ】测试订单 0083"，恢复 props 后 cell 也恢复。
+
+**结论**：v2 的 cell 内容通过 `FlowModelRenderer`（`observer`，`FlowModelRenderer.tsx:344`）渲染，联动 flow 修改 model props 后由 observer **独立重渲染**，不依赖 antd 的 cell reconcile。`shouldCellUpdate` 只阻止外层 `column.render()` 调用，不影响 cell 内部 observer。**因此无需为联动加门禁**——加了属于过度设计（AGENTS.md 明确禁止引入超出任务所需的抽象/开关）。
+
+**验证覆盖总结**：
+- 勾选：488.9ms → 106.8ms（-78%）✅
+- 快速编辑：提交后 cell 刷新正常 ✅
+- 联动（observer 链路）：record 不变时 cell 仍更新 ✅
+- 单测 55/55、eslint 无警告 ✅
+
+`shouldCellUpdate` 方案安全，可进入发布阶段。
