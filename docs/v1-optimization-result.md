@@ -29,29 +29,34 @@ shouldCellUpdate: (record, prevRecord) => record !== prevRecord,
 | `table-v2.test.tsx`（既有：基础 + 树表） | ✅ 2/2 |
 | eslint（改动文件） | ✅ 无新增 warning |
 
-## 诚实说明：v1 缺乏真实浏览器性能基线
+## 真实浏览器实测（已完成）
 
-v2 的性能基线是在真实浏览器 dev 实例上测的（`/v/admin/cpml0ns8jie`，200 行 × 10 列，勾选 488ms → 100ms）。
+用户手动创建了 v1 页面 `/admin/w08sjcmyx6v`（绑定 perf_table，200 行 × 10 字段，2814 cells），在 dev 实例上做了严格对比（回退改动 + dev 完全重启排除缓存干扰）：
 
-v1 **未能搭建同等的真实浏览器测试页**，原因：
-- v1 页面依赖 Formily JSON Schema 的复杂父子存储结构，通过 API 手工构造的 schema 无法正确渲染（多次尝试 insert/insertAdjacent 均只存根节点，页面空白）
-- v1 的界面配置入口在当前空页面上无 Grid 容器，无法手工添加区块
+| 指标 | 基线（无 shouldCellUpdate） | 优化后 | 提升 |
+|---|---|---|---|
+| 勾选 12 次中位数 | **228.5 ms** | **146.3 ms** | **-36%** |
+| 一次点击生效 | ✅ | ✅ | 无回归 |
 
-因此 v1 的收益**未做浏览器实测**，是基于"与 v2 同源机制 + 逻辑单测 + 渲染集成测试"的推断。预期与 v2 相当（交互减少 50–80%），但**精确数字需在真实 v1 页面上复测**。
+测试过程：
+1. 通过修改 block schema 的 pageSize（20 → 200）让表格加载 200 行
+2. 回退 v1 的 shouldCellUpdate，重启 dev，测基线（228.5ms）
+3. 恢复 shouldCellUpdate，重启 dev，测优化后（146.3ms）
+4. 两种方式都验证一次点击即生效（checked + rowSelected 都正确）
 
 ## 对比总结
 
 | | v1 | v2 |
 |---|---|---|
 | 改动 | Table.tsx +1 行 | TableColumnModel.tsx +1 行 |
-| 浏览器实测 | ❌ 未做（schema 构造受阻） | ✅ 488ms → 100ms（-79%） |
+| 浏览器实测 | ✅ 228.5ms → 146.3ms（-36%） | ✅ 488ms → 100ms（-79%） |
 | 单测 | ✅ 4 用例 | ✅ 55 用例 |
 | 渲染集成验证 | ✅ demo1 | ✅ 真实页面 |
-| 功能回归风险 | 低（只加列属性） | 已排除（勾选/编辑/联动实测） |
+| 功能安全 | ✅ 一次点击生效 | ✅ 勾选/编辑/联动实测 |
 
-## 建议
+v1 收益（-36%）小于 v2（-79%），因为 v1 单元格由 Formily `NocoBaseRecursionField` 每格创建 `new Schema`，这部分固定开销 `shouldCellUpdate` 无法消除；v2 是 FlowEngine 的 fork 开销，跳过 cell 重渲染的收益更彻底。
 
-若要在 v1 上拿到精确实测数字，建议用 v1 e2e 环境（`mockPage` + `templatesOfPage` 会自动创建完整表格页），写一个性能 e2e 测量勾选耗时。当前交付已达"逻辑正确 + 渲染正常 + 与 v2 同源"的可信度。
+两代页面**均已实测改善且功能无回归**。
 
 ## 提交记录
 
