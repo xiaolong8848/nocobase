@@ -83,4 +83,18 @@ shouldCellUpdate: (record, prevRecord) => record !== prevRecord,
 - `dragSortHooks.tsx`: MemoBodyRow（无独立收益）
 - 单测 13 文件 / 55 用例全部通过，eslint 无警告
 
-**下一步：跑 linkage / quick-edit e2e 验证 shouldCellUpdate 不破坏联动与编辑；若通过则保留，否则给 shouldCellUpdate 加门禁（非编辑/无联动列才启用）。**
+### 功能验证结果（浏览器实测，已通过）
+
+1. **勾选**：0→1→0 切换正常，2614 cell 数据完整 ✅
+2. **快速编辑**：打开编辑抽屉 → 修改标题 → 提交 → 抽屉关闭且表格 cell 显示新值"测试订单 0083 已编辑" ✅
+   - 根因保障：`quickEditRefresh.test.ts:22-36` 确认 `resource.setItem()` 产生新数组 + 新 record 对象（`{...before[0]}`），`record !== prevRecord` 成立 → cell 正常刷新
+3. **单测**：13 文件 / 55 用例全通过（含 rowSelection、dragSort、quickEditRefresh）✅
+
+### 结论
+
+`shouldCellUpdate: (record, prevRecord) => record !== prevRecord` 可安全保留：
+- 勾选交互 488.9ms → 106.8ms（-78%）
+- 快速编辑刷新正常（新 record 引用触发更新）
+- 无契约变更、无新依赖、只加一行列属性
+
+**剩余风险**：v2 的联动样式由 `beforeRender` Flow 驱动（`TableColumnModel.tsx:439-455`），若某联动规则仅改变 observable 而不换 record 引用，该 cell 不会重渲染。本测试表无联动规则，未覆盖此场景。建议在实际有联动的页面上做一次回归；若发现问题，给 shouldCellUpdate 加门禁（对配置了 beforeRender 流的列返回 true）即可，不影响主收益。
