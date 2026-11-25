@@ -79,12 +79,18 @@ docker run -d --name nocobase-perf-v2 --network nocobase -p 13011:80 \
 
 | 指标 | 结果 |
 |---|---|
-| 首屏 table rows / cells | 50 / **650** |
-| 全选一次点击生效 | ✅，long task 0 ms |
+| 首屏 DCL / load | **321 / 425 ms** |
+| 首屏 table rows / cells / DOM | 50 / **650** / **5,135**（优化前 200 / 2,614 / 18,775） |
+| `perf_table:list` URL | `?sort[]=-createdAt&page=1&pageSize=50&tree=false`（4 个空参数已剔除） |
+| 服务端 `perf_table:list` cost | min 8 / median 15 / max 39 ms（11 次采样） |
+| 初始化并行 | `pm:listEnabledV2` 320 ms 起、`app:getLang` 321 ms 起（并行） |
+| 徽标请求 | `unreadCounts` / `userWorkflowTasks:listMine` / `asyncTasks:list` 延后到 621–763 ms |
+| 单行勾选 | 3 次均一次点击生效，long task 0 ms |
+| 全选 50 行 | 2 次均一次点击生效，long task 0 ms |
 | hover 预取 | page + grid 共 2 个请求 |
-| 预取后 click → 可见 | **17 ms**，点击后 0 请求 |
-| 缓存页返回 | **17 ms**，0 请求 |
-| console error | 0 |
+| 预取后 click → 可见 | **47 ms**，点击后 **0 请求** |
+| 缓存页 A→B / B→A | 22 / 22 ms，**0 请求** |
+| console error | **0** |
 | v2 预载脚本 | 9 个，入口 `index-313b3818.js`；无 moment/vditor 预载 |
 
 ## 运维
