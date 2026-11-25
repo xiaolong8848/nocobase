@@ -143,7 +143,15 @@ export class APIResource<TData = any> extends FlowResource<TData> {
   protected getRefreshRequestOptions() {
     const options = {
       ...this.request,
+      params: { ...this.request.params },
     };
+    // 默认空值不参与序列化，缩短 URL 并减少服务端参数解析。
+    Object.keys(options.params).forEach((key) => {
+      const value = options.params[key];
+      if (value === null || value === undefined || (Array.isArray(value) && value.length === 0)) {
+        delete options.params[key];
+      }
+    });
     return options;
   }
 }

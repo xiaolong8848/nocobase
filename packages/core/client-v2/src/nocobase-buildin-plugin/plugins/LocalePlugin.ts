@@ -99,7 +99,11 @@ export class LocalePlugin extends Plugin {
 
   private async refreshLocale(locale: string) {
     const data = await this.fetchLocale(locale);
-    await this.applyLocaleData(data);
+    // 缓存命中后后台校验通常拿到完全相同的内容；跳过重复应用可避免
+    // defineProperty 清缓存、i18n.changeLanguage 与全量 addResources 引起的二次渲染。
+    if (JSON.stringify(data) !== JSON.stringify(readLocaleCache(locale))) {
+      await this.applyLocaleData(data);
+    }
     writeLocaleCache(locale, data);
   }
 

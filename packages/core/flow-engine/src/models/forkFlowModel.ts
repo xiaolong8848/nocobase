@@ -279,7 +279,7 @@ export class ForkFlowModel<TMaster extends FlowModel = FlowModel> {
   public invalidateOwnApplyFlowCache(eventName?: string): boolean {
     const cache = this.flowEngine?.applyFlowCache;
     const keys = this.localProperties.__applyFlowCacheKeys as Set<string> | undefined;
-    if (!cache || !keys?.size) {
+    if (!cache || cache.size === 0 || !keys?.size) {
       return false;
     }
     const eventSegments = eventName ? [`:${eventName}:`, `-${eventName}-`] : undefined;

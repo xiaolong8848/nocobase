@@ -1036,7 +1036,7 @@ export class FlowModel<Structure extends DefaultStructure = DefaultStructure> {
    */
   public invalidateOwnApplyFlowCache(eventName?: string): boolean {
     const cache = this.flowEngine?.applyFlowCache;
-    if (!cache || this.applyFlowCacheKeys.size === 0) {
+    if (!cache || cache.size === 0 || this.applyFlowCacheKeys.size === 0) {
       return false;
     }
     const eventSegments = eventName ? [`:${eventName}:`, `-${eventName}-`] : undefined;
