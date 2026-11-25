@@ -32,13 +32,26 @@
 | 虚拟滚动 | 当前 `scroll.y=undefined` 时完全不生效；需固定高度 + 门禁 + 3–5 周兼容矩阵 |
 | 选区单一数据源 / props 稳定化 / 表格区块重构 | 历史回归点 + 持久化契约风险，属于高风险结构性改动 |
 
-## 验证（生产 dist，13010）
+## 验证（生产 dist，13010，最终复测）
 
-- 单行/全选一次点击生效（50 行全选一次成功），click → 可见 **18ms**，点击后 **0 请求**
-- hover 预取仍发出 2 个请求（page + grid），缓存页切换 0 请求
-- console error：**0**
-- 测试：`apiResource` + `multiRecordResource` 8 passed；`flowModel` 139 passed / 1 skipped；
-  `applyFlowCacheIndex` 2 passed；此前的表格区块 55 passed 等全部保持通过
+| 指标 | 结果 |
+|---|---|
+| 首屏 DCL / load | 427 ms |
+| page1 行数 / cells / DOM 节点 | 50 / **650** / **5,125**（优化前 200 / 2,614 / 18,775） |
+| `perf_table:list` 请求 URL | `?sort[]=-createdAt&page=1&pageSize=50&tree=false`（4 个空参数已剔除） |
+| 服务端 `perf_table:list` cost | 18 / 21 ms（连续两次） |
+| 初始化并行 | `pm:listEnabledV2` 421 ms 起、`app:getLang` 427 ms 起（并行） |
+| 徽标请求 | 778 / 864 ms 发起，晚于首屏表格数据 |
+| 单行勾选 | 一次点击生效，long task 59 ms（首次），后续 0 ms |
+| 全选 50 行 | 一次点击生效，long task 0 ms |
+| hover 预取 | page + grid 共 2 个请求 |
+| 预取后 click → 可见 | **19 ms**，点击后 **0 请求** |
+| 缓存页 A→B / B→A | 67 ms / 19 ms，**0 请求** |
+| console error | **0** |
+
+测试全部通过：表格区块 55；`flowModel` 139 passed / 1 skipped；`forkFlowModel` 72；
+`applyFlowCacheIndex` 2；`FlowModelRenderer` 4；`apiResource` + `multiRecordResource` 8；
+`prefetchFlowPage` 3；`nonDataQuerySignature` 3；`parse-filter` 19。
 
 ## 关联文档
 
