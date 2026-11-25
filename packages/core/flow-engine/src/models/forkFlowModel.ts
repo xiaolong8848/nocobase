@@ -14,6 +14,8 @@ import { FlowModel } from './flowModel';
 import { FlowEngine } from '../flowEngine';
 import { uid } from 'uid/secure';
 
+const EMPTY_CACHE_KEYS: ReadonlySet<string> = new Set<string>();
+
 /**
  * ForkFlowModel 作为 FlowModel 的独立实例：
  *  - 大部分属性在 fork 本地存储，实现真正的实例隔离
@@ -265,6 +267,30 @@ export class ForkFlowModel<TMaster extends FlowModel = FlowModel> {
       this.localProperties.__applyFlowCacheKeys = keys;
     }
     keys.add(key);
+  }
+
+  public getApplyFlowCacheKeys(): ReadonlySet<string> {
+    return (this.localProperties.__applyFlowCacheKeys as Set<string> | undefined) ?? EMPTY_CACHE_KEYS;
+  }
+
+  /**
+   * 按本 fork 记录的缓存键精准失效；返回 false 表示没有索引可用（调用方回退到扫描）。
+   */
+  public invalidateOwnApplyFlowCache(eventName?: string): boolean {
+    const cache = this.flowEngine?.applyFlowCache;
+    const keys = this.localProperties.__applyFlowCacheKeys as Set<string> | undefined;
+    if (!cache || !keys?.size) {
+      return false;
+    }
+    const eventSegments = eventName ? [`:${eventName}:`, `-${eventName}-`] : undefined;
+    keys.forEach((key) => {
+      if (eventSegments && !eventSegments.some((segment) => key.includes(segment))) {
+        return;
+      }
+      cache.delete(key);
+      keys.delete(key);
+    });
+    return true;
   }
 
   /**

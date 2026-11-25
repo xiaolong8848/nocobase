@@ -545,55 +545,57 @@ export class FlowModel<Structure extends DefaultStructure = DefaultStructure> {
    */
   public invalidateFlowCache(eventName?: string, deep = false) {
     if (this.flowEngine) {
-      const scope = `event:${this.getFlowCacheScope(eventName || 'beforeRender')}`;
-      const cache = this.flowEngine.applyFlowCache;
+      // 优先用模型自身记录的缓存键精准失效（O(本模型键数)）；
+      // 没有索引时（例如测试中直接写入全局缓存）回退到原有扫描，保证行为兼容。
+      if (!this.invalidateOwnApplyFlowCache(eventName)) {
+        const scope = `event:${this.getFlowCacheScope(eventName || 'beforeRender')}`;
+        const cache = this.flowEngine.applyFlowCache;
 
-      if (eventName) {
-        // 删除该事件名下所有缓存（忽略不同 inputArgs 的散列差异）
-        const altScope = scope.replace(/:/g, '-');
-        const uidSuffixes = [`:${this.uid}`, `-${this.uid}`];
-        const eventSegments = [`:${eventName}:`, `-${eventName}-`];
-        for (const key of cache.keys()) {
-          const startMatches = key.startsWith(scope) || key.startsWith(altScope);
-          const endMatches = uidSuffixes.some((s) => key.endsWith(s));
-          const eventMatches = eventSegments.some((seg) => key.includes(seg));
-          if (startMatches && endMatches && eventMatches) {
-            cache.delete(key);
+        if (eventName) {
+          const altScope = scope.replace(/:/g, '-');
+          const uidSuffixes = [`:${this.uid}`, `-${this.uid}`];
+          const eventSegments = [`:${eventName}:`, `-${eventName}-`];
+          for (const key of cache.keys()) {
+            const startMatches = key.startsWith(scope) || key.startsWith(altScope);
+            const endMatches = uidSuffixes.some((s) => key.endsWith(s));
+            const eventMatches = eventSegments.some((seg) => key.includes(seg));
+            if (startMatches && endMatches && eventMatches) {
+              cache.delete(key);
+            }
           }
-        }
-      } else {
-        // 粗粒度：扫描并删除当前模型 uid 相关的事件缓存（任意事件）
-        const altScope = `${scope}:`.replace(/:/g, '-');
-        const prefixes = [`${scope}:`, altScope];
-        const uidSuffixes = [`:${this.uid}`, `-${this.uid}`];
-        for (const key of cache.keys()) {
-          const startMatches = prefixes.some((p) => key.startsWith(p));
-          const endMatches = uidSuffixes.some((s) => key.endsWith(s));
-          if (startMatches && endMatches) cache.delete(key);
+        } else {
+          const altScope = `${scope}:`.replace(/:/g, '-');
+          const prefixes = [`${scope}:`, altScope];
+          const uidSuffixes = [`:${this.uid}`, `-${this.uid}`];
+          for (const key of cache.keys()) {
+            const startMatches = prefixes.some((p) => key.startsWith(p));
+            const endMatches = uidSuffixes.some((s) => key.endsWith(s));
+            if (startMatches && endMatches) cache.delete(key);
+          }
         }
       }
 
-      // 同步失效所有 fork 的缓存
+      // 同步失效所有 fork 的缓存；同样优先走 fork 自身索引，避免 O(fork × 全局 cache) 扫描。
       this.forks.forEach((fork) => {
-        const forkScope = `event:${
-          (fork as any).getFlowCacheScope?.(eventName || 'beforeRender') ?? String((fork as any)['forkId'])
-        }`;
-        const altForkScope = forkScope.replace(/:/g, '-');
-        const uidSuffixes = [`:${this.uid}`, `-${this.uid}`];
-        if (eventName) {
-          const eventSegments = [`:${eventName}:`, `-${eventName}-`];
-          for (const key of this.flowEngine.applyFlowCache.keys()) {
-            const startMatches = key.startsWith(forkScope) || key.startsWith(altForkScope);
-            const endMatches = uidSuffixes.some((s) => key.endsWith(s));
-            const eventMatches = eventSegments.some((seg) => key.includes(seg));
-            if (startMatches && endMatches && eventMatches) this.flowEngine.applyFlowCache.delete(key);
-          }
-        } else {
-          const prefixes = [`${forkScope}:`, `${altForkScope}-`];
-          for (const key of this.flowEngine.applyFlowCache.keys()) {
-            const startMatches = prefixes.some((p) => key.startsWith(p));
-            const endMatches = uidSuffixes.some((s) => key.endsWith(s));
-            if (startMatches && endMatches) this.flowEngine.applyFlowCache.delete(key);
+        if (!fork.invalidateOwnApplyFlowCache(eventName)) {
+          const forkScope = `event:${fork.getFlowCacheScope?.(eventName || 'beforeRender') ?? String(fork['forkId'])}`;
+          const altForkScope = forkScope.replace(/:/g, '-');
+          const uidSuffixes = [`:${this.uid}`, `-${this.uid}`];
+          if (eventName) {
+            const eventSegments = [`:${eventName}:`, `-${eventName}-`];
+            for (const key of this.flowEngine.applyFlowCache.keys()) {
+              const startMatches = key.startsWith(forkScope) || key.startsWith(altForkScope);
+              const endMatches = uidSuffixes.some((s) => key.endsWith(s));
+              const eventMatches = eventSegments.some((seg) => key.includes(seg));
+              if (startMatches && endMatches && eventMatches) this.flowEngine.applyFlowCache.delete(key);
+            }
+          } else {
+            const prefixes = [`${forkScope}:`, `${altForkScope}-`];
+            for (const key of this.flowEngine.applyFlowCache.keys()) {
+              const startMatches = prefixes.some((p) => key.startsWith(p));
+              const endMatches = uidSuffixes.some((s) => key.endsWith(s));
+              if (startMatches && endMatches) this.flowEngine.applyFlowCache.delete(key);
+            }
           }
         }
       });
@@ -1016,6 +1018,38 @@ export class FlowModel<Structure extends DefaultStructure = DefaultStructure> {
     error?: Error,
   ): Promise<void> {}
 
+  /**
+   * @internal dispatchEvent 产生的 applyFlow 缓存键，按模型记录，失效时无需扫描全局缓存。
+   */
+  private applyFlowCacheKeys = new Set<string>();
+
+  public trackApplyFlowCacheKey(key: string): void {
+    this.applyFlowCacheKeys.add(key);
+  }
+
+  public getApplyFlowCacheKeys(): ReadonlySet<string> {
+    return this.applyFlowCacheKeys;
+  }
+
+  /**
+   * 按本模型记录的缓存键精准失效；返回 false 表示没有索引可用（调用方回退到扫描）。
+   */
+  public invalidateOwnApplyFlowCache(eventName?: string): boolean {
+    const cache = this.flowEngine?.applyFlowCache;
+    if (!cache || this.applyFlowCacheKeys.size === 0) {
+      return false;
+    }
+    const eventSegments = eventName ? [`:${eventName}:`, `-${eventName}-`] : undefined;
+    this.applyFlowCacheKeys.forEach((key) => {
+      if (eventSegments && !eventSegments.some((segment) => key.includes(segment))) {
+        return;
+      }
+      cache.delete(key);
+      this.applyFlowCacheKeys.delete(key);
+    });
+    return true;
+  }
+
   useHooksBeforeRender() {}
 
   /**
@@ -1209,12 +1243,6 @@ export class FlowModel<Structure extends DefaultStructure = DefaultStructure> {
   public getFlowCacheScope(eventName: string): string {
     return String(eventName);
   }
-
-  /**
-   * @internal fork 记录 dispatchEvent 产生的 applyFlow 缓存键，便于释放时按索引精准清理。
-   * 主模型不产生 fork 级缓存键，因此不实现该方法。
-   */
-  trackApplyFlowCacheKey?(key: string): void;
 
   setParent(parent: FlowModel): void {
     // forkflowModel instanceof FlowModel is false, but fork can be used as parent

@@ -177,6 +177,24 @@ const FlowModelRendererWithAutoFlows: React.FC<{
 // 移除不带 beforeRender 执行的渲染器，统一触发 beforeRender 事件
 
 /**
+ * 内容组件必须定义在模块级：若定义在渲染函数内部，每次渲染都是新组件 type，
+ * 会强制卸载/重挂 cell 子树并触发 onMount/onUnmount 事件风暴。
+ */
+const ContentOrError: React.FC<{ model: FlowModel }> = ({ model }) => {
+  const autoError = getAutoFlowError(model);
+  if (autoError) {
+    // 将 beforeRender 事件错误转化为内容区错误，由内层边界兜住
+    throw autoError;
+  }
+  const rendered = model.render();
+  // RenderFunction 模式：render 返回函数，作为组件类型渲染，避免函数作为子节点的警告
+  if (typeof rendered === 'function') {
+    return React.createElement(rendered as React.ComponentType<any>);
+  }
+  return <>{rendered}</>;
+};
+
+/**
  * 核心渲染逻辑组件
  */
 const FlowModelRendererCore: React.FC<{
@@ -219,20 +237,6 @@ const FlowModelRendererCore: React.FC<{
       return children;
     };
 
-    const ContentOrError: React.FC = () => {
-      const autoError = getAutoFlowError(model);
-      if (autoError) {
-        // 将 beforeRender 事件错误转化为内容区错误，由内层边界兜住
-        throw autoError;
-      }
-      const rendered = model.render();
-      // RenderFunction 模式：render 返回函数，作为组件类型渲染，避免函数作为子节点的警告
-      if (typeof rendered === 'function') {
-        return React.createElement(rendered as React.ComponentType<any>);
-      }
-      return <>{rendered}</>;
-    };
-
     // 如果不显示流程设置，直接返回模型内容（可能包装 ErrorBoundary）
     // 当模型类或 use 变化时重挂载内容，规避组件内部状态残留
     const rawUse = (model as any)?.use;
@@ -242,7 +246,7 @@ const FlowModelRendererCore: React.FC<{
     if (!showFlowSettings) {
       return wrapWithErrorBoundary(
         <div key={contentKey}>
-          <ContentOrError />
+          <ContentOrError model={model} />
         </div>,
       );
     }
@@ -266,7 +270,7 @@ const FlowModelRendererCore: React.FC<{
           >
             {wrapWithErrorBoundary(
               <div key={contentKey}>
-                <ContentOrError />
+                <ContentOrError model={model} />
               </div>,
             )}
           </FlowsFloatContextMenu>
@@ -277,7 +281,7 @@ const FlowModelRendererCore: React.FC<{
           <FlowsContextMenu model={model} showDeleteButton={!hideRemoveInSettings}>
             {wrapWithErrorBoundary(
               <div key={contentKey}>
-                <ContentOrError />
+                <ContentOrError model={model} />
               </div>,
             )}
           </FlowsContextMenu>
@@ -286,12 +290,12 @@ const FlowModelRendererCore: React.FC<{
       case 'modal':
         // TODO: 实现 modal 模式的流程设置
         console.warn('FlowModelRenderer: modal variant is not implemented yet');
-        return wrapWithErrorBoundary(<ContentOrError />);
+        return wrapWithErrorBoundary(<ContentOrError model={model} />);
 
       case 'drawer':
         // TODO: 实现 drawer 模式的流程设置
         console.warn('FlowModelRenderer: drawer variant is not implemented yet');
-        return wrapWithErrorBoundary(<ContentOrError />);
+        return wrapWithErrorBoundary(<ContentOrError model={model} />);
 
       default:
         console.warn(
@@ -313,7 +317,7 @@ const FlowModelRendererCore: React.FC<{
           >
             {wrapWithErrorBoundary(
               <div key={contentKey}>
-                <ContentOrError />
+                <ContentOrError model={model} />
               </div>,
             )}
           </FlowsFloatContextMenu>

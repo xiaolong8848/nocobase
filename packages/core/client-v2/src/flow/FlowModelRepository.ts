@@ -9,6 +9,7 @@
 
 import { FlowModel, IFlowModelRepository } from '@nocobase/flow-engine';
 import type { BaseApplication } from '../BaseApplication';
+import { clearPrefetchPageUids } from './prefetchFlowPage';
 import _ from 'lodash';
 
 export class MockFlowModelRepository implements IFlowModelRepository<FlowModel> {
@@ -172,6 +173,8 @@ export class FlowModelRepository implements IFlowModelRepository<FlowModel> {
 
   private clearPrefetchCache() {
     this.prefetchedFindOne.clear();
+    // 写操作后页面 JSON 已变化，允许 hover 重新预取，否则首次切换会退化到未预取路径。
+    clearPrefetchPageUids();
   }
 
   /**

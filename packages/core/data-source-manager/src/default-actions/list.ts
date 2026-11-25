@@ -12,6 +12,42 @@ import { assign, isValidFilter } from '@nocobase/utils';
 import { pageArgsToLimitArgs } from './utils';
 import _ from 'lodash';
 
+/** 表体积估算变化很慢，按 collection 缓存 simplePaginate 决策，避免每次翻页都查 pg_class.reltuples。 */
+const SIMPLE_PAGINATION_DECISION_TTL = 10 * 60 * 1000;
+const simplePaginateDecisions = new WeakMap<object, { at: number; value: boolean }>();
+
+async function resolveSimplePaginate(ctx: Context, repository): Promise<boolean | undefined> {
+  const collection = repository.collection as object | undefined;
+  if (!collection || !_.isFunction(repository['getEstimatedRowCount'])) {
+    return undefined;
+  }
+  const cached = simplePaginateDecisions.get(collection);
+  if (cached && Date.now() - cached.at < SIMPLE_PAGINATION_DECISION_TTL) {
+    return cached.value;
+  }
+
+  const count = await repository.getEstimatedRowCount();
+  const useSimplePaginate = count > SIMPLE_PAGINATION_LIMIT;
+  simplePaginateDecisions.set(collection, { at: Date.now(), value: useSimplePaginate });
+
+  if (useSimplePaginate) {
+    const resourceName = ctx.action.resourceName;
+    const targetCollection = ctx.dataSource.collectionManager.getCollection(resourceName);
+    await ctx.app.db.getRepository('dataSourcesCollections').updateOrCreate({
+      filterKeys: ['name', 'dataSourceKey'],
+      values: {
+        name: targetCollection.name,
+        dataSourceKey: ctx.dataSource.options.name,
+        options: {
+          ...repository.collection?.options,
+          simplePaginate: true,
+        },
+      },
+    });
+  }
+  return useSimplePaginate;
+}
+
 function totalPage(total, pageSize): number {
   return Math.ceil(total / pageSize);
 }
@@ -57,24 +93,8 @@ async function listWithPagination(ctx: Context) {
     }
   });
 
-  if (_.isUndefined(simplePaginate) && _.isFunction(repository['getEstimatedRowCount'])) {
-    const count = await repository.getEstimatedRowCount();
-    if (count > SIMPLE_PAGINATION_LIMIT) {
-      const resourceName = ctx.action.resourceName;
-      const collection = ctx.dataSource.collectionManager.getCollection(resourceName);
-      await ctx.app.db.getRepository('dataSourcesCollections').updateOrCreate({
-        filterKeys: ['name', 'dataSourceKey'],
-        values: {
-          name: collection.name,
-          dataSourceKey: ctx.dataSource.options.name,
-          options: {
-            ...repository.collection?.options,
-            simplePaginate: true,
-          },
-        },
-      });
-      simplePaginate = true;
-    }
+  if (_.isUndefined(simplePaginate)) {
+    simplePaginate = await resolveSimplePaginate(ctx, repository);
   }
 
   if (simplePaginate) {

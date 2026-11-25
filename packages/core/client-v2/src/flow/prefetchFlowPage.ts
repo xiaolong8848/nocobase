@@ -26,6 +26,13 @@ function collectTabGridQueries(pageData: Record<string, unknown>): GridQuery[] {
 }
 
 /**
+ * 写操作后清空预取标记，使同一菜单再次 hover 时能重新预取最新页面 JSON。
+ */
+export function clearPrefetchPageUids() {
+  prefetchedPageUids.clear();
+}
+
+/**
  * 预加载页面模型数据与模型类 chunk，但不实例化模型、不触发 beforeRender。
  *
  * 首次进入一个 V2 页面的主要耗时来自 `flowModels:findOne`（页面 JSON）以及

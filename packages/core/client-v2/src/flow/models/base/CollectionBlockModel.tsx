@@ -27,6 +27,7 @@ import { createDefaultCollectionBlockTitle } from '../../utils/blockUtils';
 import { areCapabilitiesSupported, getBlockCapabilityNamesFromModelClass } from '../../utils/actionCapability';
 import { FilterManager } from '../blocks/filter-manager/FilterManager';
 import { DataBlockModel } from './DataBlockModel';
+import { getBeforeRenderQuerySignature } from '../../../utils/nonDataQuerySignature';
 
 export interface ResourceSettingsInitParams {
   dataSourceKey: string;
@@ -45,7 +46,7 @@ export class CollectionBlockModel<T = DefaultStructure> extends DataBlockModel<T
 
   protected onMount() {
     super.onMount();
-    this.previousBeforeRenderHash = this.context.location.search;
+    this.previousBeforeRenderHash = getBeforeRenderQuerySignature(this.context.location.search);
   }
 
   private getDirtyTrackingVersion(
@@ -68,12 +69,14 @@ export class CollectionBlockModel<T = DefaultStructure> extends DataBlockModel<T
   }
 
   onActive(forceRefresh = false) {
-    if (!this.hidden && this.previousBeforeRenderHash !== this.context.location.search) {
+    const querySignature = getBeforeRenderQuerySignature(this.context.location.search);
+    if (!this.hidden && this.previousBeforeRenderHash !== querySignature) {
       this.rerender();
       if (!forceRefresh) {
         return;
       }
     }
+    this.previousBeforeRenderHash = querySignature;
 
     if (this.hidden) return;
 
