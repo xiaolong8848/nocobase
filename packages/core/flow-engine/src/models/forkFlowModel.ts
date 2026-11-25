@@ -201,8 +201,25 @@ export class ForkFlowModel<TMaster extends FlowModel = FlowModel> {
     if (this.disposed) return;
 
     if (typeof key === 'string') {
+      if (Object.is(this.localProps[key], value)) {
+        return;
+      }
       this.localProps[key] = value;
     } else {
+      if (!key || typeof key !== 'object') {
+        return;
+      }
+      // 与 master 保持一致：浅比较后跳过无变化写入。
+      let changed = false;
+      for (const propKey of Object.keys(key)) {
+        if (!Object.is(this.localProps[propKey], key[propKey])) {
+          changed = true;
+          break;
+        }
+      }
+      if (!changed) {
+        return;
+      }
       this.localProps = { ...this.localProps, ...key };
     }
   }
@@ -238,6 +255,25 @@ export class ForkFlowModel<TMaster extends FlowModel = FlowModel> {
     return `${String(eventName)}:${String(this.forkId)}`;
   }
 
+  /**
+   * 记录本 fork 在 dispatchEvent 中产生的 applyFlow 缓存键，供 dispose 时 O(1) 清理。
+   */
+  public trackApplyFlowCacheKey(key: string) {
+    let keys = this.localProperties.__applyFlowCacheKeys as Set<string> | undefined;
+    if (!keys) {
+      keys = new Set<string>();
+      this.localProperties.__applyFlowCacheKeys = keys;
+    }
+    keys.add(key);
+  }
+
+  /**
+   * 记录本 fork 在 master.forkCache 中的键，供 dispose 时 O(1) 移除。
+   */
+  public setForkCacheKey(key: string) {
+    this.localProperties.__forkCacheKey = key;
+  }
+
   // onUnmount() {
   //   // 不在此处自动 dispose（避免破坏外部 fork 管理），但应透传到 master 的 onUnmount 钩子，
   //   // 以便用户在子类覆盖 onUnmount 时依然能在 cleanRun 场景下收到回调。
@@ -258,10 +294,14 @@ export class ForkFlowModel<TMaster extends FlowModel = FlowModel> {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
-    // 统一按事件缓存命名规则清理当前 fork 的所有缓存项（覆盖所有事件）
+    // 优先按 fork 自己记录的缓存键清理，避免扫描整个全局 flow 缓存（大表格下这是主要开销）。
     try {
       const cache = this.flowEngine?.applyFlowCache;
-      if (cache && cache.size > 0) {
+      const indexedKeys = this.localProperties.__applyFlowCacheKeys as Set<string> | undefined;
+      if (cache && indexedKeys?.size) {
+        indexedKeys.forEach((key) => cache.delete(key));
+        indexedKeys.clear();
+      } else if (cache && cache.size > 0) {
         const uidSuffixes = [`:${this.uid}`, `-${this.uid}`];
         const forkIdColon = `:${this.forkId}:`;
         const forkIdHyphen = `-${this.forkId}-`;
@@ -298,10 +338,15 @@ export class ForkFlowModel<TMaster extends FlowModel = FlowModel> {
     // 从 master 的 forkCache 中移除自己
     if (this.master && (this.master as any).forkCache) {
       const forkCache = (this.master as any).forkCache;
-      for (const [key, fork] of forkCache.entries()) {
-        if (fork === this) {
-          forkCache.delete(key);
-          break;
+      const ownKey = this.localProperties.__forkCacheKey as string | undefined;
+      if (ownKey && forkCache.get(ownKey) === this) {
+        forkCache.delete(ownKey);
+      } else {
+        for (const [key, fork] of forkCache.entries()) {
+          if (fork === this) {
+            forkCache.delete(key);
+            break;
+          }
         }
       }
     }

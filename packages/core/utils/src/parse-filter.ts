@@ -9,7 +9,6 @@
 
 import _ from 'lodash';
 import set from 'lodash/set';
-import moment from 'moment';
 import { offsetFromString } from './date';
 import { dayjs } from './dayjs';
 import { getValuesByPath } from './getValuesByPath';
@@ -217,7 +216,7 @@ export type GetDayRangeOptions = {
 
 export function getDayRange(options: GetDayRangeOptions) {
   const { now, timezone = '+00:00', offset } = options;
-  let m = toMoment(now).utcOffset(offsetFromString(timezone));
+  let m = toDayjs(now).utcOffset(offsetFromString(timezone));
   if (offset > 0) {
     return [
       // 第二天开始计算
@@ -242,14 +241,14 @@ export function getDayRange(options: GetDayRangeOptions) {
   ];
 }
 
-function toMoment(value, useMoment = false) {
+function toDayjs(value) {
   if (!value) {
-    return (useMoment ? moment() : dayjs()) as dayjs.Dayjs;
+    return dayjs();
   }
   if (dayjs.isDayjs(value)) {
     return value;
   }
-  return (useMoment ? moment(value) : dayjs(value)) as dayjs.Dayjs;
+  return dayjs(value);
 }
 
 export type Utc2unitOptions = {
@@ -261,20 +260,25 @@ export type Utc2unitOptions = {
 
 export function utc2unit(options: Utc2unitOptions) {
   const { now, unit, timezone = '+00:00', offset } = options;
-  let m = toMoment(now, unit === 'isoWeek');
+  let m = toDayjs(now);
   m = m.utcOffset(offsetFromString(timezone));
   m = m.startOf(unit);
+  // dayjs 不支持 add/subtract 的 'isoWeek' 单位，按周平移等价于在 ISO 周起点上加 7 天。
+  const shiftUnit = unit === 'isoWeek' ? 'week' : unit;
   if (offset > 0) {
-    m = m.add(offset, unit);
+    m = m.add(offset, shiftUnit);
   } else if (offset < 0) {
-    m = m.subtract(-1 * offset, unit);
+    m = m.subtract(-1 * offset, shiftUnit);
   }
+  // dayjs 的 isoWeek/GGGG 在 utcOffset 模式下会混用本地时区计算，可能偏差一周。
+  // 先把“目标时区的墙上时间”平移到 UTC 墙钟时间，再计算 ISO 周，结果与 moment 一致。
+  const isoWeekOf = (value: dayjs.Dayjs) => value.add(value.utcOffset(), 'minute').utc().format('GGGG[W]WW');
   const fn = {
     year: () => m.format('YYYY'),
     quarter: () => m.format('YYYY[Q]Q'),
     month: () => m.format('YYYY-MM'),
     week: () => m.format('gggg[w]ww'),
-    isoWeek: () => m.format('GGGG[W]WW'),
+    isoWeek: () => isoWeekOf(m),
     day: () => m.format('YYYY-MM-DD'),
   };
   const r = fn[unit]?.();

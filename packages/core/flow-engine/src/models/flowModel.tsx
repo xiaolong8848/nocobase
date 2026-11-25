@@ -775,8 +775,26 @@ export class FlowModel<Structure extends DefaultStructure = DefaultStructure> {
   setProps(key: string, value: any): void;
   setProps(props: IModelComponentProps | string, value?: any): void {
     if (typeof props === 'string') {
+      if (Object.is(this.props[props], value)) {
+        return;
+      }
       this.props[props] = value;
     } else {
+      if (!props || typeof props !== 'object') {
+        return;
+      }
+      // 浅比较：所有传入的 props 引用都未变化时跳过写入，避免触发无意义的重渲染。
+      // 表格每行每列都会经过 FieldModelRenderer -> setProps，这里的提前返回可显著减少更新循环。
+      let changed = false;
+      for (const key of Object.keys(props)) {
+        if (!Object.is(this.props[key], props[key])) {
+          changed = true;
+          break;
+        }
+      }
+      if (!changed) {
+        return;
+      }
       this.props = { ...this.props, ...props };
     }
 
@@ -1192,6 +1210,12 @@ export class FlowModel<Structure extends DefaultStructure = DefaultStructure> {
     return String(eventName);
   }
 
+  /**
+   * @internal fork 记录 dispatchEvent 产生的 applyFlow 缓存键，便于释放时按索引精准清理。
+   * 主模型不产生 fork 级缓存键，因此不实现该方法。
+   */
+  trackApplyFlowCacheKey?(key: string): void;
+
   setParent(parent: FlowModel): void {
     // forkflowModel instanceof FlowModel is false, but fork can be used as parent
     const isValidParent =
@@ -1406,6 +1430,8 @@ export class FlowModel<Structure extends DefaultStructure = DefaultStructure> {
     // 如果提供了 key，将 fork 缓存起来
     if (key && options?.register !== false) {
       this.forkCache.set(key, fork as any);
+      // 记录缓存键，dispose 时可直接删除，避免遍历整个 forkCache。
+      fork.setForkCacheKey(key);
     }
 
     return fork as ForkFlowModel<this>;

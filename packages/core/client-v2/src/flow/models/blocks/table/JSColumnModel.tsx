@@ -141,6 +141,12 @@ export class JSColumnModel extends TableCustomColumnModel {
         const tk = this.context.collection?.getFilterByTK?.(record);
         const forkKey = tk ?? record?.id ?? index;
         const recordSignature = getRecordRenderSignature(record);
+        // 翻页会不断产生新主键，fork 缓存需要上限，避免随浏览页数无界增长。
+        const MAX_JS_CELL_FORKS = 600;
+        if (this.forks.size > MAX_JS_CELL_FORKS) {
+          const oldest = this.forks.values().next().value;
+          oldest?.dispose();
+        }
         const fork = this.createFork({}, String(forkKey));
         const previousRecordSignature = (fork as any).__recordRenderSignature;
         if (previousRecordSignature !== recordSignature) {

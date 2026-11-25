@@ -453,6 +453,10 @@ export interface EnsureBatchResult {
 
 export interface IFlowModelRepository<T extends FlowModel = FlowModel> {
   findOne(query: Record<string, any>): Promise<Record<string, any> | null>;
+  /**
+   * 预取模型数据（可选）。实现应做短时缓存，供紧随其后的 findOne 复用，避免二次请求。
+   */
+  prefetch?(query: Record<string, any>): Promise<Record<string, any> | null>;
   save(model: T, options?: { onlyStepParams?: boolean }): Promise<Record<string, any>>;
   destroy(uid: string): Promise<boolean>;
   move(sourceId: string, targetId: string, position: 'before' | 'after'): Promise<void>;

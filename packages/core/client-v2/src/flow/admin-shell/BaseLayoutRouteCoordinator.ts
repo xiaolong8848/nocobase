@@ -284,7 +284,10 @@ export class BaseLayoutRouteCoordinator {
 
     const viewState = runtime.viewState[getKey(rootViewItem)];
     if (active) {
-      viewState?.activate?.(true);
+      // 页面数据与 block resource 在 KeepAlive 中已保留，返回缓存页时无需强制刷新。
+      // 非强制激活仍会在 query 变化、数据源 dirty version 变化或手动刷新模式下重新加载，
+      // 因此这里只需触发 activate()，避免每次返回页面都重复请求所有 block。
+      viewState?.activate?.();
       return;
     }
 

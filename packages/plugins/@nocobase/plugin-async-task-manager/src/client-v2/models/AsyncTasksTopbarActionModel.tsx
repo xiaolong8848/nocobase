@@ -8,7 +8,7 @@
  */
 
 import { ExclamationCircleOutlined, EyeOutlined, StopOutlined, SyncOutlined } from '@ant-design/icons';
-import { Icon, TopbarActionModel, useApp, useMobileLayout } from '@nocobase/client-v2';
+import { Icon, scheduleIdleTask, TopbarActionModel, useApp, useMobileLayout } from '@nocobase/client-v2';
 import { observer } from '@nocobase/flow-engine';
 import { useRequest } from 'ahooks';
 import {
@@ -359,12 +359,20 @@ const AsyncTasksTopbarAction = observer(
   () => {
     const app = useApp();
     const { isMobileLayout } = useMobileLayout();
-    const { data, refresh, loading } = useRequest(async (): Promise<AsyncTasksListBody> => {
-      const response = await app.apiClient.resource('asyncTasks').list({
-        sort: '-createdAt',
-      });
-      return (response?.data ?? { data: [] }) as AsyncTasksListBody;
-    });
+    const { data, refresh, loading } = useRequest(
+      async (): Promise<AsyncTasksListBody> => {
+        const response = await app.apiClient.resource('asyncTasks').list({
+          sort: '-createdAt',
+        });
+        return (response?.data ?? { data: [] }) as AsyncTasksListBody;
+      },
+      { manual: true },
+    );
+
+    useEffect(() => {
+      // 异步任务列表只影响顶栏按钮，延后到空闲时加载。
+      return scheduleIdleTask(() => refresh());
+    }, [refresh]);
 
     const [tasks, setTasks] = useState<AsyncTaskRecord[]>([]);
     const [popoverVisible, setPopoverVisible] = useState(false);

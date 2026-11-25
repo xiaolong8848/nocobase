@@ -32,8 +32,15 @@ export class FlowExecutor {
   }
 
   /** Cache wrapper for applyFlow cache lifecycle */
-  private async withApplyFlowCache<T>(cacheKey: string | null, executor: () => Promise<T>): Promise<T> {
+  private async withApplyFlowCache<T>(
+    cacheKey: string | null,
+    model: FlowModel,
+    executor: () => Promise<T>,
+  ): Promise<T> {
     if (!cacheKey || !this.engine) return await executor();
+
+    // 记录 fork 产生的缓存键，dispose 时按索引清理，避免全量扫描全局缓存。
+    model.trackApplyFlowCacheKey?.(cacheKey);
 
     const cachedEntry = this.engine.applyFlowCache.get(cacheKey);
     if (cachedEntry) {
@@ -504,7 +511,7 @@ export class FlowExecutor {
       : null;
 
     try {
-      const { result, abortedByExitAll } = await this.withApplyFlowCache(cacheKey, execute);
+      const { result, abortedByExitAll } = await this.withApplyFlowCache(cacheKey, model, execute);
       // 事件结束钩子
       try {
         await model.onDispatchEventEnd?.(eventName, options, inputArgs, result);

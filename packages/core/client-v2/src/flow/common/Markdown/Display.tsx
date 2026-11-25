@@ -11,7 +11,6 @@ import { Popover, QRCode } from 'antd';
 import { css } from '@emotion/css';
 import { createRoot } from 'react-dom/client';
 import React, { CSSProperties, useCallback, useEffect, useRef, useState } from 'react';
-import Vditor from 'vditor';
 import { removeMarkdownIframes, stripMarkdownIframes } from '../../../utils/markdownSanitize';
 import { useCDN } from './useCDN';
 import useStyle from './style';
@@ -48,8 +47,19 @@ function DisplayInner(props: { value: string; style?: CSSProperties; loadImages?
   const { wrapSSR, componentCls, hashId } = useStyle();
   const cdn = useCDN();
   useEffect(() => {
-    if (props.loadImages) {
-      Vditor.preview(containerRef.current, props.value ?? '', {
+    if (!props.loadImages) {
+      return;
+    }
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const renderPreview = async () => {
+      // Vditor 体积较大，按需加载，避免进入首屏 bundle。
+      const { default: VditorCtor } = await import('vditor');
+      if (disposed || !containerRef.current) {
+        return;
+      }
+      await VditorCtor.preview(containerRef.current, props.value ?? '', {
         mode: 'light',
         cdn,
         markdown: {
@@ -59,7 +69,10 @@ function DisplayInner(props: { value: string; style?: CSSProperties; loadImages?
       })
         .then(() => removeMarkdownIframes(containerRef.current))
         .catch(() => removeMarkdownIframes(containerRef.current));
-      setTimeout(() => {
+      if (disposed) {
+        return;
+      }
+      timer = setTimeout(() => {
         removeMarkdownIframes(containerRef.current);
         containerRef.current?.querySelectorAll('img').forEach((img: HTMLImageElement) => {
           img.style.cursor = 'zoom-in';
@@ -75,7 +88,16 @@ function DisplayInner(props: { value: string; style?: CSSProperties; loadImages?
           root.render(<QRCode value={value} />);
         });
       }, 300);
-    }
+    };
+
+    renderPreview().catch(() => removeMarkdownIframes(containerRef.current));
+
+    return () => {
+      disposed = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
   }, [props.value, props.loadImages, cdn]);
 
   return wrapSSR(
@@ -132,9 +154,17 @@ export const Display = (props) => {
 
   const elRef = useRef<HTMLDivElement>();
   useEffect(() => {
-    if (!props.value) return;
-    if (textOnly) {
-      Vditor.md2html(props.value, {
+    if (!props.value || !textOnly) {
+      return;
+    }
+    let disposed = false;
+
+    const renderText = async () => {
+      const { default: VditorCtor } = await import('vditor');
+      if (disposed) {
+        return;
+      }
+      await VditorCtor.md2html(props.value, {
         mode: 'light',
         cdn,
         markdown: {
@@ -142,10 +172,26 @@ export const Display = (props) => {
         },
       })
         .then((html) => {
-          setText(convertToText(stripMarkdownIframes(html)));
+          if (!disposed) {
+            setText(convertToText(stripMarkdownIframes(html)));
+          }
         })
-        .catch(() => setText(''));
-    }
+        .catch(() => {
+          if (!disposed) {
+            setText('');
+          }
+        });
+    };
+
+    renderText().catch(() => {
+      if (!disposed) {
+        setText('');
+      }
+    });
+
+    return () => {
+      disposed = true;
+    };
   }, [props.value, textOnly, cdn]);
 
   const isOverflowTooltip = useCallback(() => {

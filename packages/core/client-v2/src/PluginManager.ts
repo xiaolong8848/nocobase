@@ -42,22 +42,31 @@ export class PluginManager<TApp extends BaseApplication<any> = BaseApplication<a
     protected app: TApp,
   ) {
     this.app = app;
-    this.initPlugins = this.init(_plugins || []);
+    // 先赋值再启动 init，确保 init 内部能立即读取 loadRemotePlugins。
     this.loadRemotePlugins = loadRemotePlugins;
+    this.initPlugins = this.init(_plugins || []);
   }
 
   /**
    * @internal
    */
   async init(_plugins: PluginType<any, TApp>[]) {
+    // 远端插件清单与静态插件初始化互不依赖（清单是公开接口），提前并行请求，
+    // 避免被 app:getLang 等静态插件的 await 串行阻塞。
+    const remotePluginsPromise = this.loadRemotePlugins ? this.requestRemotePlugins() : undefined;
     await this.initStaticPlugins(_plugins);
-    if (this.loadRemotePlugins) {
-      await this.initRemotePlugins();
+    if (remotePluginsPromise) {
+      await this.initRemotePlugins(await remotePluginsPromise);
     }
   }
 
   protected getRemotePluginsRequestUrl() {
     return 'pm:listEnabledV2';
+  }
+
+  protected async requestRemotePlugins(): Promise<PluginData[]> {
+    const res = await this.app.apiClient.request({ url: this.getRemotePluginsRequestUrl() });
+    return res?.data?.data || [];
   }
 
   private async initStaticPlugins(_plugins: PluginType<any, TApp>[] = []) {
@@ -68,9 +77,7 @@ export class PluginManager<TApp extends BaseApplication<any> = BaseApplication<a
     }
   }
 
-  protected async initRemotePlugins() {
-    const res = await this.app.apiClient.request({ url: this.getRemotePluginsRequestUrl() });
-    const pluginList: PluginData[] = res?.data?.data || [];
+  protected async initRemotePlugins(pluginList: PluginData[]) {
     const plugins = await getPlugins({
       requirejs: this.app.requirejs,
       pluginData: pluginList,

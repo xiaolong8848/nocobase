@@ -10,7 +10,7 @@
 import React, { useCallback, useEffect } from 'react';
 import { Avatar, Button, Card, Flex, notification, theme, Typography } from 'antd';
 import { CloseOutlined } from '@ant-design/icons';
-import { useApp, useMobileLayout } from '@nocobase/client-v2';
+import { scheduleIdleTask, useApp, useMobileLayout } from '@nocobase/client-v2';
 import { observer } from '@nocobase/flow-engine';
 import { ChatBox } from './ChatBox';
 import { ChatButton } from './ChatButton';
@@ -60,10 +60,12 @@ const ChatBoxLayoutContent: React.FC<{
   }, [loadUnreadCounts]);
 
   useEffect(() => {
-    refreshUnreadCounts();
+    // 未读数是顶栏徽标，不参与页面内容渲染，延后到空闲时再拉取。
+    const cancelInitialFetch = scheduleIdleTask(refreshUnreadCounts);
     app.eventBus.addEventListener('ws:message:ai-employee-tasks:status', refreshUnreadCounts);
     app.eventBus.addEventListener('ws:message:ai-conversations:read', refreshUnreadCounts);
     return () => {
+      cancelInitialFetch();
       app.eventBus.removeEventListener('ws:message:ai-employee-tasks:status', refreshUnreadCounts);
       app.eventBus.removeEventListener('ws:message:ai-conversations:read', refreshUnreadCounts);
     };

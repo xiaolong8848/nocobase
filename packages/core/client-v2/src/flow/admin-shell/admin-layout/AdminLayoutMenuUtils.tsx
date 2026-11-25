@@ -23,6 +23,7 @@ import React, { FC, useCallback, useContext, useEffect } from 'react';
 import { Link, useLocation, type NavigateFunction } from 'react-router-dom';
 import { Icon, NocoBaseDesktopRouteType, type NocoBaseDesktopRoute } from '../../../flow-compat';
 import { runAfterMobileMenuClosed } from './mobileMenuNavigation';
+import { prefetchFlowPage } from '../../prefetchFlowPage';
 import { ResetThemeTokenAndKeepAlgorithm } from './ResetThemeTokenAndKeepAlgorithm';
 import type { AdminLayoutMenuItemModel } from './AdminLayoutMenuModels';
 import { uid } from '@nocobase/utils/client';
@@ -569,6 +570,38 @@ export function resolveAdminLayoutMenuDragMoveOptionsFromEvent(
   );
 }
 
+/**
+ * 从菜单节点解析出可用于预加载的页面 uid。
+ * - page / flowPage：URL 参数即 route.schemaUid；
+ * - group：指向 landing page，取 runtimePath 的最后一段。
+ */
+function resolveMenuPrefetchPageUid(item: AdminLayoutMenuNode): string | undefined {
+  const route = item._route;
+  if (route?.type === NocoBaseDesktopRouteType.page || route?.type === NocoBaseDesktopRouteType.flowPage) {
+    return route.schemaUid || undefined;
+  }
+  if (route?.type !== NocoBaseDesktopRouteType.group) {
+    return undefined;
+  }
+  const runtimePath = item._runtimePath;
+  if (!runtimePath) {
+    return undefined;
+  }
+  const pathname = runtimePath.split('?')[0].split('#')[0];
+  const segments = pathname.split('/').filter(Boolean);
+  return segments.length ? segments[segments.length - 1] : undefined;
+}
+
+function resolveMenuPrefetchTabUids(item: AdminLayoutMenuNode): string[] {
+  const children = (item._route as { children?: Array<{ type?: string; schemaUid?: string }> })?.children;
+  if (!Array.isArray(children)) {
+    return [];
+  }
+  return children
+    .filter((child) => child?.type === NocoBaseDesktopRouteType.tabs && !!child.schemaUid)
+    .map((child) => child.schemaUid as string);
+}
+
 const GroupItem: FC<{ item: AdminLayoutMenuNode; options?: AdminLayoutMenuRenderOptions }> = (props) => {
   const { item } = props;
   const { inHeader } = useContext(HeaderContext);
@@ -576,6 +609,9 @@ const GroupItem: FC<{ item: AdminLayoutMenuNode; options?: AdminLayoutMenuRender
   const navigate = useNavigateNoUpdate();
   const routerBasename = useRouterBasename();
   const { closeMobileMenu } = useContext(MobileMenuControlContext);
+  const handlePrefetch = useCallback(() => {
+    prefetchFlowPage(item._model?.flowEngine, resolveMenuPrefetchPageUid(item), resolveMenuPrefetchTabUids(item));
+  }, [item]);
   const ariaLabel =
     getMenuItemText(item.name) ??
     (typeof item._route?.title === 'string' || typeof item._route?.title === 'number'
@@ -655,6 +691,8 @@ const GroupItem: FC<{ item: AdminLayoutMenuNode; options?: AdminLayoutMenuRender
           aria-label={ariaLabel}
           title={inHeader || item._route?.tooltip ? undefined : ariaLabel}
           role="none"
+          onMouseEnter={handlePrefetch}
+          onFocus={handlePrefetch}
           style={inHeader ? menuItemStyle : siderMenuItemStyle}
         >
           {content}
@@ -681,6 +719,9 @@ const MenuItem: FC<{ item: AdminLayoutMenuNode; options?: AdminLayoutMenuRenderO
   const navigate = useNavigateNoUpdate();
   const basenameOfCurrentRouter = useRouterBasename();
   const { closeMobileMenu } = useContext(MobileMenuControlContext);
+  const handlePrefetch = useCallback(() => {
+    prefetchFlowPage(item._model?.flowEngine, resolveMenuPrefetchPageUid(item), resolveMenuPrefetchTabUids(item));
+  }, [item]);
   const path = item.redirect || item.path;
   const runtimePath = item._runtimePath || path;
   const spaRuntimePath = runtimePath ? toRouterNavigationPath(runtimePath, basenameOfCurrentRouter) : runtimePath;
@@ -778,7 +819,12 @@ const MenuItem: FC<{ item: AdminLayoutMenuNode; options?: AdminLayoutMenuRenderO
     return (
       <ParentRouteContext.Provider value={item._parentRoute}>
         <NocoBaseRouteContext.Provider value={item._route}>
-          <div role="none" style={inHeader ? menuItemStyle : siderMenuItemStyle}>
+          <div
+            role="none"
+            onMouseEnter={handlePrefetch}
+            onFocus={handlePrefetch}
+            style={inHeader ? menuItemStyle : siderMenuItemStyle}
+          >
             <div onClick={handleClickLink} style={inHeader ? undefined : siderMenuItemContentStyle}>
               <Link
                 to={location.pathname}
@@ -835,7 +881,12 @@ const MenuItem: FC<{ item: AdminLayoutMenuNode; options?: AdminLayoutMenuRenderO
   return (
     <ParentRouteContext.Provider value={item._parentRoute}>
       <NocoBaseRouteContext.Provider value={item._route}>
-        <div role="none" style={inHeader ? menuItemStyle : siderMenuItemStyle}>
+        <div
+          role="none"
+          onMouseEnter={handlePrefetch}
+          onFocus={handlePrefetch}
+          style={inHeader ? menuItemStyle : siderMenuItemStyle}
+        >
           {itemContent}
           {badgeCount != null && (
             <Badge

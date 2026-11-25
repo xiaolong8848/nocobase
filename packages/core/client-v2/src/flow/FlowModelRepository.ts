@@ -150,6 +150,10 @@ export class FlowModelRepository implements IFlowModelRepository<FlowModel> {
 
   private inFlightFindOne = new Map<string, Promise<any>>();
 
+  /** 预取缓存：菜单 hover 时提前拉取页面 JSON，导航时由 findOne 一次性消费。 */
+  private prefetchedFindOne = new Map<string, { at: number; data: any }>();
+  private static readonly PREFETCH_TTL_MS = 15000;
+
   private buildFindOneKey(query: any) {
     const uid = query?.uid ?? '';
     const parentId = query?.parentId ?? '';
@@ -157,23 +161,63 @@ export class FlowModelRepository implements IFlowModelRepository<FlowModel> {
     return `uid:${uid}|parentId:${parentId}|subKey:${subKey}`;
   }
 
+  private requestFindOne(query: any) {
+    return this.app.apiClient
+      .request({
+        url: 'flowModels:findOne',
+        params: _.pick(query, ['uid', 'parentId', 'subKey']),
+      })
+      .then((response) => response.data?.data);
+  }
+
+  private clearPrefetchCache() {
+    this.prefetchedFindOne.clear();
+  }
+
+  /**
+   * 预取模型数据并缓存一小段时间。仅用于“即将导航到该页面”的场景，
+   * 不会实例化模型，也不会触发 beforeRender。
+   */
+  async prefetch(query: any) {
+    const key = this.buildFindOneKey(query);
+    const cached = this.prefetchedFindOne.get(key);
+    if (cached && Date.now() - cached.at <= FlowModelRepository.PREFETCH_TTL_MS) {
+      return cached.data;
+    }
+    const existing = this.inFlightFindOne.get(key);
+    if (existing) {
+      return existing;
+    }
+    const promise = this.requestFindOne(query).finally(() => {
+      this.inFlightFindOne.delete(key);
+    });
+    this.inFlightFindOne.set(key, promise);
+    const data = await promise.catch(() => undefined);
+    if (data) {
+      this.prefetchedFindOne.set(key, { at: Date.now(), data });
+    }
+    return data;
+  }
+
   async findOne(query) {
     const key = this.buildFindOneKey(query);
+    const prefetched = this.prefetchedFindOne.get(key);
+    if (prefetched) {
+      this.prefetchedFindOne.delete(key);
+      if (Date.now() - prefetched.at <= FlowModelRepository.PREFETCH_TTL_MS) {
+        return _.cloneDeep(prefetched.data);
+      }
+    }
+
     const existing = this.inFlightFindOne.get(key);
     if (existing) {
       const data = await existing;
       return data ? _.cloneDeep(data) : data;
     }
 
-    const promise = this.app.apiClient
-      .request({
-        url: 'flowModels:findOne',
-        params: _.pick(query, ['uid', 'parentId', 'subKey']),
-      })
-      .then((response) => response.data?.data)
-      .finally(() => {
-        this.inFlightFindOne.delete(key);
-      });
+    const promise = this.requestFindOne(query).finally(() => {
+      this.inFlightFindOne.delete(key);
+    });
 
     this.inFlightFindOne.set(key, promise);
     const data = await promise;
@@ -181,6 +225,7 @@ export class FlowModelRepository implements IFlowModelRepository<FlowModel> {
   }
 
   async save(model: FlowModel, options?: { onlyStepParams?: boolean }) {
+    this.clearPrefetchCache();
     const data = model.serialize();
     if (options?.onlyStepParams) {
       delete data.subModels;
@@ -194,6 +239,7 @@ export class FlowModelRepository implements IFlowModelRepository<FlowModel> {
   }
 
   async destroy(uid: string) {
+    this.clearPrefetchCache();
     await this.app.apiClient.request({
       method: 'POST',
       url: 'flowModels:destroy',
@@ -203,6 +249,7 @@ export class FlowModelRepository implements IFlowModelRepository<FlowModel> {
   }
 
   async move(sourceId: string, targetId: string, position: 'before' | 'after' = 'after') {
+    this.clearPrefetchCache();
     const response = await this.app.apiClient.request({
       method: 'POST',
       url: 'flowModels:move',
@@ -212,6 +259,7 @@ export class FlowModelRepository implements IFlowModelRepository<FlowModel> {
   }
 
   async duplicate(uid: string) {
+    this.clearPrefetchCache();
     const response = await this.app.apiClient.request({
       method: 'POST',
       url: 'flowModels:duplicate',

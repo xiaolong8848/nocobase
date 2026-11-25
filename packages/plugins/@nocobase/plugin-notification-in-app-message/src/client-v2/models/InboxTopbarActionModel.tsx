@@ -13,7 +13,7 @@ import { observer, tExpr, useFlowEngine } from '@nocobase/flow-engine';
 import { useMemoizedFn } from 'ahooks';
 import { Badge, Button, ConfigProvider, Drawer, Tooltip, notification, theme } from 'antd';
 import React, { useEffect } from 'react';
-import { TopbarActionModel, useCurrentUserContext, useMobileLayout } from '@nocobase/client-v2';
+import { scheduleIdleTask, TopbarActionModel, useCurrentUserContext, useMobileLayout } from '@nocobase/client-v2';
 import { InboxContent } from '../components/InboxContent';
 import { useInAppMessageTranslation } from '../locale';
 import {
@@ -131,8 +131,11 @@ const InboxButton = observer(
     });
 
     useEffect(() => {
-      updateUnreadMsgsCount().catch((error) => {
-        console.error('Failed to initialize unread count', error);
+      // 未读数只影响顶栏徽标，延后到空闲时加载，避免阻塞首屏。
+      return scheduleIdleTask(() => {
+        updateUnreadMsgsCount().catch((error) => {
+          console.error('Failed to initialize unread count', error);
+        });
       });
     }, []);
 

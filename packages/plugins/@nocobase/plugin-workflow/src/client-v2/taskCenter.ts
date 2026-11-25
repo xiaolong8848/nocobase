@@ -7,6 +7,7 @@
  * For more information, please refer to: https://www.nocobase.com/agreement.
  */
 
+import { scheduleIdleTask } from '@nocobase/client-v2';
 import { useMemoizedFn } from 'ahooks';
 import type { ComponentType, ReactNode } from 'react';
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
@@ -348,8 +349,11 @@ export function useWorkflowTaskCounts(
   });
 
   useEffect(() => {
-    loadCounts(true).catch((error) => {
-      console.error('Failed to load workflow task counts', error);
+    // 任务计数只影响顶栏徽标，延后到空闲时加载，避免阻塞首屏。
+    return scheduleIdleTask(() => {
+      loadCounts(true).catch((error) => {
+        console.error('Failed to load workflow task counts', error);
+      });
     });
   }, [loadCounts, taskTypeKeySignature]);
 

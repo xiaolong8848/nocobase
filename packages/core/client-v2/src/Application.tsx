@@ -21,7 +21,7 @@ import type { RouterOptions } from './RouterManager';
 import { RouterManager } from './RouterManager';
 import type { WebSocketClientOptions } from './WebSocketClient';
 import CSSVariableProvider from './css-variable/CSSVariableProvider';
-
+import { scheduleIdleTask } from './utils/scheduleIdleTask';
 export type { DevDynamicImport, ComponentAndProps } from './BaseApplication';
 export { ApplicationModel } from './BaseApplication';
 
@@ -110,7 +110,9 @@ export class Application extends BaseApplication<
       this.hasLoadError = false;
       await this.loadWebSocket();
       await this.pm.load();
-      await this.flowEngine.flowSettings.load();
+      // FlowSettings 只用于配置模式，加载的是 Formily/antd 组件。首屏渲染不需要它，
+      // 延后到浏览器空闲时加载，避免阻塞页面可用时间；打开设置时会按需等待 load()。
+      this.scheduleFlowSettingsLoad();
     } catch (error: any) {
       this.hasLoadError = true;
 
@@ -130,6 +132,14 @@ export class Application extends BaseApplication<
       console.error(error, this.error);
     }
     this.updateFavicon();
+  }
+
+  private scheduleFlowSettingsLoad() {
+    scheduleIdleTask(() => {
+      this.flowEngine.flowSettings.load().catch((error) => {
+        console.error('[NocoBase] Failed to load flow settings components', error);
+      });
+    });
   }
 
   async loadWebSocket() {

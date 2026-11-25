@@ -15,7 +15,7 @@ import type { TextAreaRef } from 'antd/es/input/TextArea';
 import { FlowContextSelector, useFlowContext, useFlowModel } from '@nocobase/flow-engine';
 import React, { useEffect, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import Vditor from 'vditor';
+import type VditorInstance from 'vditor';
 import 'vditor/dist/index.css';
 import { stripMarkdownIframeTags, stripMarkdownIframes } from '../../../utils/markdownSanitize';
 import { useCDN } from './useCDN';
@@ -75,7 +75,7 @@ const Edit = (props) => {
   const flowCtx = useFlowContext();
 
   const [editorReady, setEditorReady] = useState(false);
-  const vdRef = useRef<Vditor>();
+  const vdRef = useRef<VditorInstance>();
   const vdFullscreen = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const containerParentRef = useRef<HTMLDivElement>(null);
@@ -101,138 +101,152 @@ const Edit = (props) => {
 
   useEffect(() => {
     if (!containerRef.current) return;
+    let disposed = false;
+    let observer: MutationObserver | undefined;
 
-    const toolbarConfig = placeToolbarTooltipsBelow(toolbar ?? defaultToolbar);
-    const safeValue = stripMarkdownIframeTags(value ?? '');
-    const vditor = new Vditor(containerRef.current, {
-      value: safeValue,
-      lang,
-      cache: { enable: false },
-      undoDelay: 0,
-      mode: props.mode || 'ir',
-      preview: {
-        markdown: {
-          sanitize: true,
+    const mountEditor = async () => {
+      // Vditor 体积较大且只在 Markdown 编辑时使用，改为按需加载，避免进入首屏 bundle。
+      const { default: VditorCtor } = await import('vditor');
+      if (disposed || !containerRef.current) return;
+
+      const toolbarConfig = placeToolbarTooltipsBelow(toolbar ?? defaultToolbar);
+      const safeValue = stripMarkdownIframeTags(value ?? '');
+      const vditor: VditorInstance = new VditorCtor(containerRef.current, {
+        value: safeValue,
+        lang,
+        cache: { enable: false },
+        undoDelay: 0,
+        mode: props.mode || 'ir',
+        preview: {
+          markdown: {
+            sanitize: true,
+          },
+          math: { engine: 'KaTeX' },
+          transform: stripMarkdownIframes,
         },
-        math: { engine: 'KaTeX' },
-        transform: stripMarkdownIframes,
-      },
-      toolbar: toolbarConfig,
-      fullscreen: { index: 1200 },
-      cdn,
-      minHeight: 200,
-      height: props.height,
-      after: () => {
-        vdRef.current = vditor;
-        setEditorReady(true); // Notify that the editor is ready
-        if (disabled) {
-          vditor.disabled();
-        } else {
-          vditor.enable();
-          document.querySelectorAll('qr-code').forEach((el) => {
-            const value = el.getAttribute('value') || '';
-            const container = document.createElement('div');
-            el.replaceWith(container);
-            const root = createRoot(container);
-            root.render(<QRCode value={value} />);
-          });
-        }
-      },
-      input(nextValue) {
-        const safeNextValue = stripMarkdownIframeTags(nextValue);
-        if (safeNextValue !== nextValue) {
-          vditor.setValue(safeNextValue);
-        }
-        onChange(safeNextValue);
-      },
-      upload: {
-        multiple: false,
-        fieldName: 'file',
-        async handler(files: File[]) {
-          const file = files[0];
-
-          // Need to ensure focus is in the current input box before uploading
-          vditor.focus();
-
-          const { data: checkData } = await apiClient.resource('vditor').check({
-            fileCollectionName: fileCollection,
-          });
-
-          if (!checkData?.data?.isSupportToUploadFiles) {
-            vditor.tip(
-              t('vditor.uploadError.message', { ns: NAMESPACE, storageTitle: checkData.data.storage?.title }),
-              0,
-            );
-            return;
-          }
-
-          vditor.tip(t('uploading'), 0);
-          const { data, errorMessage } = await fileManagerPlugin.uploadFile({
-            file,
-            fileCollectionName: fileCollection,
-            storageId: checkData?.data?.storage?.id,
-            storageType: checkData?.data?.storage?.type,
-            storageRules: checkData?.data?.storage?.rules,
-          });
-
-          if (errorMessage) {
-            vditor.tip(translateRef.current(errorMessage), 3000);
-            return;
-          }
-
-          if (!data) {
-            vditor.tip(t('Response data is empty', { ns: NAMESPACE }), 3000);
-            return;
-          }
-
-          const fileName = data.filename;
-          const fileUrl = data.url;
-
-          // Check if the uploaded file is an image
-          const isImage = file.type.startsWith('image/');
-
-          if (isImage) {
-            // Insert as an image - will be displayed in the editor
-            vditor.insertValue(`![${fileName}](${fileUrl})`);
+        toolbar: toolbarConfig,
+        fullscreen: { index: 1200 },
+        cdn,
+        minHeight: 200,
+        height: props.height,
+        after: () => {
+          vdRef.current = vditor;
+          setEditorReady(true); // Notify that the editor is ready
+          if (disabled) {
+            vditor.disabled();
           } else {
-            // For non-image files, insert as a download link
-            vditor.insertValue(`[${fileName}](${fileUrl})`);
+            vditor.enable();
+            document.querySelectorAll('qr-code').forEach((el) => {
+              const value = el.getAttribute('value') || '';
+              const container = document.createElement('div');
+              el.replaceWith(container);
+              const root = createRoot(container);
+              root.render(<QRCode value={value} />);
+            });
           }
-
-          // hide the tip
-          vditor.tip(t(''), 10);
-
-          return null;
         },
-      },
-    });
-    vditorRef.current = vditor;
-    const editorEl = containerRef.current;
-    if (!editorEl) return;
-    const observer = new MutationObserver(() => {
-      const isFullscreen = editorEl.classList.contains('vditor--fullscreen');
+        input(nextValue) {
+          const safeNextValue = stripMarkdownIframeTags(nextValue);
+          if (safeNextValue !== nextValue) {
+            vditor.setValue(safeNextValue);
+          }
+          onChange(safeNextValue);
+        },
+        upload: {
+          multiple: false,
+          fieldName: 'file',
+          async handler(files: File[]) {
+            const file = files[0];
 
-      // 只选当前编辑器内部的元素，避免影响其它编辑器
-      const resetEls = editorEl.querySelectorAll('.vditor-reset');
-      const toolbarEls = editorEl.querySelectorAll('.vditor-toolbar');
+            // Need to ensure focus is in the current input box before uploading
+            vditor.focus();
 
-      resetEls.forEach((el) => {
-        (el as HTMLElement).style.padding = isFullscreen ? '10px 200px' : '';
+            const { data: checkData } = await apiClient.resource('vditor').check({
+              fileCollectionName: fileCollection,
+            });
+
+            if (!checkData?.data?.isSupportToUploadFiles) {
+              vditor.tip(
+                t('vditor.uploadError.message', { ns: NAMESPACE, storageTitle: checkData.data.storage?.title }),
+                0,
+              );
+              return;
+            }
+
+            vditor.tip(t('uploading'), 0);
+            const { data, errorMessage } = await fileManagerPlugin.uploadFile({
+              file,
+              fileCollectionName: fileCollection,
+              storageId: checkData?.data?.storage?.id,
+              storageType: checkData?.data?.storage?.type,
+              storageRules: checkData?.data?.storage?.rules,
+            });
+
+            if (errorMessage) {
+              vditor.tip(translateRef.current(errorMessage), 3000);
+              return;
+            }
+
+            if (!data) {
+              vditor.tip(t('Response data is empty', { ns: NAMESPACE }), 3000);
+              return;
+            }
+
+            const fileName = data.filename;
+            const fileUrl = data.url;
+
+            // Check if the uploaded file is an image
+            const isImage = file.type.startsWith('image/');
+
+            if (isImage) {
+              // Insert as an image - will be displayed in the editor
+              vditor.insertValue(`![${fileName}](${fileUrl})`);
+            } else {
+              // For non-image files, insert as a download link
+              vditor.insertValue(`[${fileName}](${fileUrl})`);
+            }
+
+            // hide the tip
+            vditor.tip(t(''), 10);
+
+            return null;
+          },
+        },
+      });
+      vditorRef.current = vditor;
+      const editorEl = containerRef.current;
+      if (!editorEl) return;
+      const observer = new MutationObserver(() => {
+        const isFullscreen = editorEl.classList.contains('vditor--fullscreen');
+
+        // 只选当前编辑器内部的元素，避免影响其它编辑器
+        const resetEls = editorEl.querySelectorAll('.vditor-reset');
+        const toolbarEls = editorEl.querySelectorAll('.vditor-toolbar');
+
+        resetEls.forEach((el) => {
+          (el as HTMLElement).style.padding = isFullscreen ? '10px 200px' : '';
+        });
+
+        toolbarEls.forEach((el) => {
+          (el as HTMLElement).style.paddingLeft = isFullscreen ? '200px' : '';
+        });
       });
 
-      toolbarEls.forEach((el) => {
-        (el as HTMLElement).style.paddingLeft = isFullscreen ? '200px' : '';
+      observer.observe(editorEl, {
+        attributes: true,
+        attributeFilter: ['class'],
       });
+    };
+
+    mountEditor().catch((error) => {
+      console.error('[Markdown] Failed to load Vditor editor', error);
     });
 
-    observer.observe(editorEl, {
-      attributes: true,
-      attributeFilter: ['class'],
-    });
     return () => {
+      disposed = true;
       vdRef.current?.destroy();
       vdRef.current = undefined;
-      observer.disconnect();
+      observer?.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [toolbar?.join(',')]);

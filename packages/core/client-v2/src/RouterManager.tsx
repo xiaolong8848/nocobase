@@ -9,7 +9,7 @@
 
 import { get, set } from 'lodash';
 import React, { ComponentType, createContext, useContext } from 'react';
-import { matchRoutes } from 'react-router';
+import { matchPath, matchRoutes } from 'react-router';
 import {
   type BrowserRouterProps,
   createBrowserRouter,
@@ -153,6 +153,8 @@ function removeBasename(pathname: string, basename?: string) {
 
 export class RouterManager<TApp extends BaseApplication<any> = BaseApplication<any>> {
   protected routes: Record<string, RouteType> = {};
+  /** 路由树缓存：避免 matchRoutes 每次重建 React.lazy 组件导致重复挂载与重复加载。 */
+  private routesTreeCache: RouteObject[] | null = null;
   protected options: RouterOptions;
   private routerNavigate?: Router['navigate'];
   public app: TApp;
@@ -239,9 +241,24 @@ export class RouterManager<TApp extends BaseApplication<any> = BaseApplication<a
     return moduleOrComponent.default || moduleOrComponent.Component;
   }
 
+  private routeComponentPromises = new Map<ComponentLoader, Promise<ComponentLoaderResult>>();
+
+  /**
+   * 缓存 componentLoader 的 Promise，避免 React.lazy 重建时重复加载模块。
+   */
+  protected loadRouteComponent(componentLoader: ComponentLoader): Promise<ComponentLoaderResult> {
+    const existing = this.routeComponentPromises.get(componentLoader);
+    if (existing) {
+      return existing;
+    }
+    const promise = componentLoader();
+    this.routeComponentPromises.set(componentLoader, promise);
+    return promise;
+  }
+
   protected createRouteLazyComponent(componentLoader: ComponentLoader): ComponentType {
     const LazyComponent = React.lazy(() =>
-      componentLoader().then((moduleOrComponent) => {
+      this.loadRouteComponent(componentLoader).then((moduleOrComponent) => {
         const loadedComponent = this.resolveLoadedComponent(moduleOrComponent);
         if (!loadedComponent) {
           throw new Error('componentLoader must resolve to a React component or component module.');
@@ -269,9 +286,28 @@ export class RouterManager<TApp extends BaseApplication<any> = BaseApplication<a
   }
 
   /**
+   * 按路径预加载带 componentLoader 的路由模块（用于菜单 hover / 首屏空闲预取）。
+   */
+  prefetchRouteComponent(pathname: string): Promise<unknown> | undefined {
+    const relativePath = removeBasename(pathname, this.router?.basename || this.getBasename());
+    for (const route of Object.values(this.routes)) {
+      const loader = route?.componentLoader;
+      if (!loader || !route?.path) {
+        continue;
+      }
+      if (matchPath({ path: route.path, end: true }, relativePath)) {
+        return this.loadRouteComponent(loader);
+      }
+    }
+    return undefined;
+  }
+  /**
    * @internal
    */
   getRoutesTree(): RouteObject[] {
+    if (this.routesTreeCache) {
+      return this.routesTreeCache;
+    }
     type RouteTypeWithChildren = RouteType & { children?: RouteTypeWithChildren };
     const routes: Record<string, RouteTypeWithChildren> = {};
 
@@ -319,7 +355,8 @@ export class RouterManager<TApp extends BaseApplication<any> = BaseApplication<a
       }, []);
     };
 
-    return buildRoutesTree(routes);
+    this.routesTreeCache = buildRoutesTree(routes);
+    return this.routesTreeCache;
   }
 
   getRoutes() {
@@ -418,6 +455,7 @@ export class RouterManager<TApp extends BaseApplication<any> = BaseApplication<a
   }
 
   add(name: string, route: RouteType) {
+    this.routesTreeCache = null;
     this.routes[name] = {
       id: name,
       ...route,
@@ -436,6 +474,7 @@ export class RouterManager<TApp extends BaseApplication<any> = BaseApplication<a
   }
 
   remove(name: string) {
+    this.routesTreeCache = null;
     delete this.routes[name];
   }
 }
