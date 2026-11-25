@@ -1,5 +1,16 @@
 # 用当前 fork 的源码 + 已构建产物打包本地性能验证镜像。
-# 与官方 Dockerfile 不同：不从 npm 拉取发行版，而是 COPY 工作区并重新安装 Linux 平台依赖。
+# 多阶段构建：安装/清理留在 builder 层，最终镜像只保留精简后的运行时文件。
+FROM node:22-bookworm-slim AS builder
+
+WORKDIR /app/nocobase
+
+COPY . /app/nocobase/
+
+RUN yarn config set network-timeout 600000 -g \
+    && yarn install --frozen-lockfile --production \
+    && sh /app/nocobase/docker/nocobase/cleanup-node-modules.sh /app/nocobase \
+    && rm -rf /usr/local/share/.cache/yarn /root/.cache/yarn
+
 FROM node:22-bookworm-slim
 
 ENV NOCOBASE_RUNNING_IN_DOCKER=true \
@@ -8,13 +19,9 @@ ENV NOCOBASE_RUNNING_IN_DOCKER=true \
 
 WORKDIR /app/nocobase
 
-COPY . /app/nocobase/
+COPY --from=builder /app/nocobase /app/nocobase
 
-# node_modules 不进构建上下文（macOS 原生二进制不可用于 Linux）。
-# 容器内按 Linux 平台重新安装；lib/es/dist 是宿主机已构建产物，保留不动。
-RUN yarn config set network-timeout 600000 -g \
-    && yarn install --frozen-lockfile --production \
-    && ln -sf /app/nocobase/node_modules/.bin/nb /usr/local/bin/nb \
+RUN ln -sf /app/nocobase/node_modules/.bin/nb /usr/local/bin/nb \
     && mkdir -p /app/nocobase/storage/uploads \
     && chmod +x /app/nocobase/docker/nocobase/docker-entrypoint-perf.sh
 

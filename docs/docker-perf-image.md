@@ -5,8 +5,8 @@
 
 ## 镜像
 
-- 镜像：`nocobase-perf:v2-optimized`（11.2 GB）
-- Dockerfile：`docker/nocobase/Dockerfile-perf-local`
+- 镜像：`nocobase-perf:v2-optimized`（**2.97 GB**）
+- Dockerfile：`docker/nocobase/Dockerfile-perf-local`（多阶段构建）
 - 入口：`docker/nocobase/docker-entrypoint-perf.sh`
 - 与官方 Dockerfile 的区别：不从 npm 拉取发行版，而是把当前 fork 的源码 + 已构建的
   `lib`/`es`/`dist` 复制进镜像，并在 Linux 容器内重新安装依赖（避免 macOS 原生二进制不可用）。
@@ -34,6 +34,19 @@ EOF
 docker build -f docker/nocobase/Dockerfile-perf-local -t nocobase-perf:v2-optimized .
 cp /tmp/dockerignore.perf.backup .dockerignore
 ```
+
+## 为什么曾经有 11.2 GB（已修复）
+
+首版是单阶段构建，两个来源造成膨胀：
+
+| 来源 | 大小 | 处理 |
+|---|---|---|
+| `yarn install` 的缓存 `/usr/local/share/.cache/yarn` | **4.9 GB** | 多阶段构建，builder 层不进最终镜像，并显式删除缓存 |
+| 未清理的 `node_modules` | 2.1 GB | 复用官方 `docker/nocobase/cleanup-node-modules.sh`，降到 1.6 GB |
+
+官方镜像约 2 GB 是因为它在 builder 阶段就做了 `cleanup-node-modules.sh`，且只打包
+`create-nocobase-app` 生成的精简应用；本镜像额外包含整个 monorepo 源码与全部插件构建产物
+（COPY 层约 600 MB），所以最终 2.97 GB 属于合理范围。
 
 ## 数据库
 
