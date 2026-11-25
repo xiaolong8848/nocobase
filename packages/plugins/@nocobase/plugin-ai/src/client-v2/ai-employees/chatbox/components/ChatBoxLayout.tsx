@@ -7,10 +7,10 @@
  * For more information, please refer to: https://www.nocobase.com/agreement.
  */
 
-import React, { useCallback, useEffect } from 'react';
+import React, { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { Avatar, Button, Card, Flex, notification, theme, Typography } from 'antd';
 import { CloseOutlined } from '@ant-design/icons';
-import { scheduleIdleTask, useApp, useMobileLayout } from '@nocobase/client-v2';
+import { CurrentUserContext, useApp, useMobileLayout } from '@nocobase/client-v2';
 import { observer } from '@nocobase/flow-engine';
 import { ChatBox } from './ChatBox';
 import { ChatButton } from './ChatButton';
@@ -33,43 +33,68 @@ const { Text } = Typography;
 
 export const ChatBoxLayout: React.FC<{
   children?: React.ReactNode;
-}> = ({ children }) => {
+  UserConsumer?: typeof CurrentUserContext.Consumer;
+}> = ({ children, UserConsumer = CurrentUserContext.Consumer }) => {
+  const { apiClient, eventBus } = useApp();
+  // V1 can retain the last current-user response after sign-out.
+  const subscribe = useCallback(
+    (notify: () => void) => {
+      eventBus.addEventListener('auth:tokenChanged', notify);
+      return () => eventBus.removeEventListener('auth:tokenChanged', notify);
+    },
+    [eventBus],
+  );
+  const hasToken = useSyncExternalStore(subscribe, () => Boolean(apiClient.auth.token));
   return (
     <ChatBoxRuntimeProvider runtime={getGlobalChatBoxRuntime()}>
-      <ChatBoxLayoutContent>{children}</ChatBoxLayoutContent>
+      {children}
+      <UserConsumer>
+        {(user) => {
+          const userId = user?.data?.data?.id;
+          return hasToken && userId != null ? <ChatDataSync key={userId} /> : null;
+        }}
+      </UserConsumer>
+      <ChatBoxLayoutContent />
     </ChatBoxRuntimeProvider>
   );
 };
 
-const ChatBoxLayoutContent: React.FC<{
-  children?: React.ReactNode;
-}> = observer(({ children }) => {
-  const app = useApp();
-  const { isMobileLayout } = useMobileLayout();
-  const { chatBoxModel, chatToolModel } = useChatBoxRuntime();
-  const open = chatBoxModel.open;
-  const expanded = chatBoxModel.expanded;
-  const activeTool = chatToolModel.activeTool;
+const ChatDataSync = () => {
+  const { eventBus } = useApp();
+  const repository = useAIConfigRepository();
   const { loadUnreadCounts } = useChatConversationActions();
-  const { triggerTask } = useChatBoxActions();
-  const aiConfigRepository = useAIConfigRepository();
-  const t = useT();
+
+  useEffect(() => {
+    repository.refreshAIEmployees().catch(console.error);
+  }, [repository]);
 
   const refreshUnreadCounts = useCallback(() => {
     loadUnreadCounts().catch(console.error);
   }, [loadUnreadCounts]);
 
   useEffect(() => {
-    // 未读数是顶栏徽标，不参与页面内容渲染，延后到空闲时再拉取。
-    const cancelInitialFetch = scheduleIdleTask(refreshUnreadCounts);
-    app.eventBus.addEventListener('ws:message:ai-employee-tasks:status', refreshUnreadCounts);
-    app.eventBus.addEventListener('ws:message:ai-conversations:read', refreshUnreadCounts);
+    refreshUnreadCounts();
+    eventBus.addEventListener('ws:message:ai-employee-tasks:status', refreshUnreadCounts);
+    eventBus.addEventListener('ws:message:ai-conversations:read', refreshUnreadCounts);
     return () => {
-      cancelInitialFetch();
-      app.eventBus.removeEventListener('ws:message:ai-employee-tasks:status', refreshUnreadCounts);
-      app.eventBus.removeEventListener('ws:message:ai-conversations:read', refreshUnreadCounts);
+      eventBus.removeEventListener('ws:message:ai-employee-tasks:status', refreshUnreadCounts);
+      eventBus.removeEventListener('ws:message:ai-conversations:read', refreshUnreadCounts);
     };
-  }, [app.eventBus, refreshUnreadCounts]);
+  }, [eventBus, refreshUnreadCounts]);
+
+  return null;
+};
+
+const ChatBoxLayoutContent = observer(() => {
+  const app = useApp();
+  const { isMobileLayout } = useMobileLayout();
+  const { chatBoxModel, chatToolModel } = useChatBoxRuntime();
+  const open = chatBoxModel.open;
+  const expanded = chatBoxModel.expanded;
+  const activeTool = chatToolModel.activeTool;
+  const { triggerTask } = useChatBoxActions();
+  const aiConfigRepository = useAIConfigRepository();
+  const t = useT();
 
   useEffect(() => {
     const plugin = app.pm.get('ai') as PluginAIClientV2 | undefined;
@@ -114,8 +139,7 @@ const ChatBoxLayoutContent: React.FC<{
 
   return (
     <>
-      {children}
-      <ChatButton />
+      <ChatButton loadEmployeesOnMount={false} />
       {open && !expanded && !isMobileLayout ? (
         <style>
           {`

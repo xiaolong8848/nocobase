@@ -5,6 +5,39 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/),
 并且本项目遵循 [语义化版本](https://semver.org/spec/v2.0.0.html)。
 
+## [v2.2.52](https://github.com/nocobase/nocobase/compare/v2.2.51...v2.2.52) - 2026-11-24
+
+### 🐛 修复
+
+- **[client-v2]**
+  - 缩小了手机窄屏下详情区块和网格卡片中横向只读字段的间距，多行文本也更紧凑。 ([#11673](https://github.com/nocobase/nocobase/pull/11673))
+
+  - 修复现代页面先以浏览模式打开，再开启 UI Editor 添加区块后，刷新时区块消失的问题。 ([#11672](https://github.com/nocobase/nocobase/pull/11672))
+
+- **[自定义变量]** 修复配置徽章聚合变量时，多行文本筛选条件无法输入内容的问题。 ([#11688](https://github.com/nocobase/nocobase/pull/11688))
+
+- **[文件管理器]** 修复刷新外部数据源或读取带有其他关联的记录时可能报错的问题。 ([#11698](https://github.com/nocobase/nocobase/pull/11698))
+
+- **[表单草稿]** 浏览器读取或保存本地草稿失败时，仍可正常打开、填写和提交表单。 ([#11671](https://github.com/nocobase/nocobase/pull/11671))
+
+- **[AI 员工]** 修复登录页和双因素验证页提前请求 AI 员工列表及未读数的问题。 ([#11691](https://github.com/nocobase/nocobase/pull/11691))
+
+- **[通知管理]** 工作流提供无效的用户接收人配置时，通知会停止发送，并在发送日志中提示如何更正。 ([#11680](https://github.com/nocobase/nocobase/pull/11680))
+
+## [v2.2.51](https://github.com/nocobase/nocobase/compare/v2.2.50...v2.2.51) - 2026-11-22
+
+### 🚀 优化
+
+- **[client-v2]** 缩小了移动端横向详情区块的字段间距。 ([#11644](https://github.com/nocobase/nocobase/pull/11644))
+
+### 🐛 修复
+
+- **[错误处理器]** 保存记录或关联数据时，重复值和非空字段提示会在原文前显示所属数据表的标题。 ([#11638](https://github.com/nocobase/nocobase/pull/11638))
+
+- **[通知：站内信]** 修复在移动端收件箱打开渠道时可能显示其他渠道消息的问题。 ([#11662](https://github.com/nocobase/nocobase/pull/11662))
+
+- **[迁移管理]** PostgreSQL 迁移包现在会排除无关序列，目标库缺少其他表使用的 schema 时也能还原所选表。
+
 ## [v2.2.50](https://github.com/nocobase/nocobase/compare/v2.2.49...v2.2.50) - 2026-11-21
 
 ### 🚀 优化
