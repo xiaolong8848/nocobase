@@ -15,6 +15,7 @@ import { dayjsLocale } from './dayjsLocale';
 import { loadConstrueLocale } from './loadConstrueLocale';
 
 const LOCALE_CACHE_PREFIX = 'nocobase:v2:locale';
+const LOCALE_REFRESH_TTL = 60 * 1000;
 
 type LocaleData = {
   lang?: string;
@@ -54,8 +55,18 @@ function readLocaleCache(locale: string): LocaleData | undefined {
 function writeLocaleCache(locale: string, data: LocaleData) {
   try {
     window.sessionStorage.setItem(getLocaleCacheKey(locale), JSON.stringify(data));
+    window.sessionStorage.setItem(`${getLocaleCacheKey(locale)}:at`, String(Date.now()));
   } catch {
     // 存储不可用或超出配额时忽略，缓存只是优化项。
+  }
+}
+
+function wasLocaleRecentlyRefreshed(locale: string): boolean {
+  try {
+    const raw = window.sessionStorage.getItem(`${getLocaleCacheKey(locale)}:at`);
+    return !!raw && Date.now() - Number(raw) < LOCALE_REFRESH_TTL;
+  } catch {
+    return false;
   }
 }
 
@@ -71,11 +82,13 @@ export class LocalePlugin extends Plugin {
     const cached = readLocaleCache(locale);
 
     if (cached) {
-      // 命中缓存时先应用，立即参与首屏渲染；随后后台校验最新语言资源。
+      // 命中缓存时先应用，立即参与首屏渲染；短 TTL 内不再重复请求体积较大的语言资源。
       await this.applyLocaleData(cached);
-      this.refreshLocale(locale).catch((error) => {
-        console.error('[NocoBase] Failed to refresh locale resources', error);
-      });
+      if (!wasLocaleRecentlyRefreshed(locale)) {
+        this.refreshLocale(locale).catch((error) => {
+          console.error('[NocoBase] Failed to refresh locale resources', error);
+        });
+      }
       return;
     }
 

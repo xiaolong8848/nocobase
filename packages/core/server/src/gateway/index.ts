@@ -46,6 +46,25 @@ import { Duplex } from 'node:stream';
 export { getHost, getHostname } from './utils';
 
 const compress = promisify(compression());
+
+// API（尤其 app:getLang）响应体较大且此前未压缩；仅对普通 JSON 请求启用 gzip，
+// 跳过 SSE 流式响应与下载/导出接口，避免改变这些端点的语义。
+const compressApi = promisify(
+  compression({
+    threshold: 1024,
+    filter: (req, res) => {
+      const accept = req.headers?.accept;
+      if (typeof accept === 'string' && accept.includes('text/event-stream')) {
+        return false;
+      }
+      const pathname = (req.url || '').split('?')[0];
+      if (/(\/|:)download|export/i.test(pathname)) {
+        return false;
+      }
+      return compression.filter(req, res);
+    },
+  }),
+);
 const APP_NAME_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_-]*$/;
 const MAX_APP_NAME_LENGTH = 255;
 
@@ -649,6 +668,7 @@ export class Gateway extends EventEmitter {
     }
 
     const ctx: GatewayRequestContext = { req, res, appName: handleApp };
+    await compressApi(req, res);
     const fn = compose([
       ...this.middlewares.nodes,
       async (_ctx) => {
