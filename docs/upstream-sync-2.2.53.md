@@ -63,8 +63,11 @@ useEffect(() => {
 }, [eventBus, refreshUnreadCounts]);
 ```
 
-官方新增的 `repository.refreshAIEmployees()` 是登录后加载 AI 员工的修复，保留原样即可；
-若想继续贯彻“顶栏请求延后”，可同样用 `scheduleIdleTask` 包一层，但需回归 AI 员工列表。
+官方新增的 `repository.refreshAIEmployees()` 是登录后加载 AI 员工的修复，保留原样。
+
+**实际执行时的调整**：合并后 `ChatBoxLayout.test.tsx` 有一处断言要求登录后同步调用一次
+`loadUnreadCounts`，与我们的空闲延后冲突。为避免改动上游测试语义，最终**回退了 AI 未读数的延后**
+（其他徽标：workflow / asyncTasks / inbox 的延后仍保留）。回退后该测试 6 passed。
 
 ### 3.2 一个需要补的小点
 
